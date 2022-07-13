@@ -49,3 +49,16 @@ class LitTrainer(pl.LightningModule):
 
 if __name__ == "__main__":
     main()
+
+
+# batch_a = dataloader_a.next()
+# batch_a_to_b = model_b.denoise(batch_a)
+# batch_a, batch_a_noise = add_noise(t, batch_a, batch_a_to_b)
+# batch_a_pred = model_a(batch_a)
+# loss_a = mse(batch_a_pred, batch_a_noise)
+
+# batch_b = dataloader_b.next()
+# batch_b_to_a = model_a.denoise(batch_b)
+# batch_b, batch_b_noise = add_noise(t, batch_b, batch_b_to_a)
+# batch_b_pred = model_b(batch_b)
+# loss_b = mse(batch_b_pred, batch_b_noise)
