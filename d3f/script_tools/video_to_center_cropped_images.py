@@ -43,10 +43,17 @@ class VideoToImages():
         self.output_dir_path.mkdir(exist_ok=True)
     
     def convert_video_to_images(self):
+        
+        file_path_list = []
 
         for frame_index, frame in tqdm(enumerate(self.open_video_as_generator())):
+            
+            file_path =  self.resize_and_save_frame_as_image(frame,frame_index)
 
-            self.resize_and_save_frame_as_image(frame,frame_index)
+            file_path_list.append(file_path)
+            
+        self.save_file_path_list(file_path_list)
+        
 
     def open_video_as_generator(self):
 
@@ -69,7 +76,9 @@ class VideoToImages():
 
         frame = self.resize_image(frame)
 
-        self.save_frame_to_disk(frame,frame_index)
+        file_path = self.save_frame_to_disk(frame,frame_index)
+
+        return file_path
 
     def crop_image_at_center(self,image):
         h,w,c = image.shape
@@ -99,10 +108,27 @@ class VideoToImages():
 
     def save_frame_to_disk(self,frame,frame_index):
 
-        file_path = str( self.output_dir_path / f"{frame_index:05}.jpg" )
+        file_name = f"{frame_index:06}.jpg"
 
-        cv2.imwrite(file_path,frame)
+        file_path = self.output_dir_path / file_name
 
+        cv2.imwrite(str(file_path), frame)
+
+        return file_path
+
+    def save_file_path_list(self,file_path_list):
+
+        text_path = self.output_dir_path / "images.txt"
+
+        with open(text_path,"w") as f:
+
+            for file_path in file_path_list:
+
+                relative_file_path = file_path.relative_to(self.output_dir_path)
+         
+                f.write(str(relative_file_path) )
+                f.write("\n")
+        
 
 
 if __name__ == "__main__":
