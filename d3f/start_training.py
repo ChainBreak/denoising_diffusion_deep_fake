@@ -7,6 +7,7 @@ import torch
 import torch.nn as nn
 from torch.utils.data import DataLoader
 import torchvision.transforms as T
+import torchvision
 from d3f.dataset.image_dataset import ImageDataset
 
 
@@ -66,6 +67,7 @@ class LitTrainer(pl.LightningModule):
             dataset=dataset, 
             batch_size=p.batch_size,
             num_workers=p.num_workers,
+            shuffle=True,
             )
         
         return dataloader
@@ -85,11 +87,17 @@ class LitTrainer(pl.LightningModule):
         return model
 
     def training_step(self, batch, batch_idx, optimizer_idx):
+        p = self.hparams
+
         batch_a = batch["a"]
         batch_b = batch["b"]
 
-        # print(f"{optimizer_idx=}",batch_a[0,0,0,0],batch_b[0,0,0,0])
+        if batch_idx == 0 :
+            self.log_tensor_as_image("raw/datset_a", batch_a, p.mean_a, p.std_a)
+            self.log_tensor_as_image("raw/datset_b", batch_b, p.mean_b, p.std_b)
+
         if optimizer_idx == 0:
+            
             pred = self.model_a(batch_a)
         if optimizer_idx == 1:
             pred = self.model_b(batch_b)
@@ -101,6 +109,21 @@ class LitTrainer(pl.LightningModule):
         optimizer_b = torch.optim.Adam(self.model_b.parameters(), lr=p.learning_rate)
         return [optimizer_a, optimizer_b]
 
+    def log_tensor_as_image(self,tag, batch, mean, std):
+        nrows = 3
+        ncols = 3
+        n = nrows*ncols
+
+        image = torchvision.utils.make_grid(batch[:n], nrows)
+
+        image *= torch.tensor(mean).reshape(3,1,1).to(self.device)
+        image += torch.tensor(std).reshape(3,1,1).to(self.device)
+        image /= 255
+
+        image = image.clamp(0,1)
+
+        self.logger.experiment.add_image( tag, image, self.current_epoch)
+        
 
 if __name__ == "__main__":
     main()
