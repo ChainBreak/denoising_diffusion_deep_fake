@@ -1,3 +1,12 @@
-batch_size: 32
-
+batch_size: 64
+learning_rate: 0.001
+num_workers: 8
 encoder_name: "resnet34"
+
+data_path_a: "/home/thomas/datasets/denoising_diffusion_deep_fake/tom_w128_h128"
+mean_a: [128,128,128]
+std_a: [128,128,128]
+
+data_path_b: "/home/thomas/datasets/denoising_diffusion_deep_fake/georgia_w128_h128"
+mean_b: [128,128,128]
+std_b: [128,128,128]
