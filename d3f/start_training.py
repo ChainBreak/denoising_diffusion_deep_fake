@@ -44,6 +44,10 @@ class LitTrainer(pl.LightningModule):
         self.model_a = self.create_model_instance()
         self.model_b = self.create_model_instance()
 
+        self.mse_loss = nn.MSELoss()
+
+        self.current_batch = 0
+
     def train_dataloader(self):
         p = self.hparams
 
@@ -93,43 +97,43 @@ class LitTrainer(pl.LightningModule):
         return [optimizer_a, optimizer_b]
 
     def training_step(self, batch, batch_idx, optimizer_idx):
+        self.current_batch = batch_idx
         p = self.hparams
 
         batch_a = batch["a"]
         batch_b = batch["b"]
 
-        if batch_idx == 0 :
-            self.log_tensor_as_image("dataset/a", batch_a)
-            self.log_tensor_as_image("dataset/b", batch_b)
+        self.log_batch_as_image_grid("dataset/a", batch_a, first_batch_only=True)
+        self.log_batch_as_image_grid("dataset/b", batch_b, first_batch_only=True)
 
         if optimizer_idx == 0:
-            self.training_step_for_one_model( self.model_a, batch_a, self.model_b)
+            loss = self.training_step_for_one_model("a", self.model_a, batch_a, self.model_b)
             
         if optimizer_idx == 1:
-            self.training_step_for_one_model( self.model_b, batch_b, self.model_a)
+            loss = self.training_step_for_one_model("b", self.model_b, batch_b, self.model_a)
             
-        return 
+        return loss
 
 
-    def training_step_for_one_model(self, this_model, this_batch, other_model):
+    def training_step_for_one_model(self,name, this_model, this_batch, other_model,):
         
         this_noisy_batch = self.blend_images_with_noise(this_batch)
 
-        self.log_tensor_as_image("this_noise_batch/a", this_noisy_batch)
-
         other_fake_batch = self.iteratively_denoise_image(other_model, this_noisy_batch)
-
-        self.log_tensor_as_image("other_fake_batch/a", other_fake_batch)
 
         target_noise = self.blend_images_with_noise(other_fake_batch)
 
-        self.log_tensor_as_image("target_noise/a", target_noise)
+        input_batch,time = self.create_diffusion_samples(this_batch, target_noise)
 
-        # input_batch, times = self.create_diffusion_samples(this_batch, target_noise)
+        noise_prediction = this_model(input_batch)
 
-        # noise_prediction = this_model(input_batch)
+        loss = self.mse_loss(noise_prediction, target_noise)
 
-        # loss = self.mse_loss(noise_prediction, target_noise)
+        self.log_batch_as_image_grid(f"noise_batch/{name}", this_noisy_batch, first_batch_only=True)
+        self.log_batch_as_image_grid(f"fake_batch/{name}_to_other", other_fake_batch, first_batch_only=True)
+        self.log_batch_as_image_grid(f"target_noise/{name}", target_noise, first_batch_only=True)
+        self.log_batch_as_image_grid(f"model_input/{name}", input_batch, first_batch_only=True)
+        self.log_batch_as_image_grid(f"predicted_noise/{name}", noise_prediction, first_batch_only=True)
 
         return loss
 
@@ -171,10 +175,27 @@ class LitTrainer(pl.LightningModule):
 
             return xt
 
+    def create_diffusion_samples(self, x0, noise):
+        b,c,h,w = x0.shape
 
+        alpha_t = torch.rand(
+            size=(b,1,1,1),
+            device=self.device,
+        )
 
+        xt = sqrt(alpha_t) * x0 + sqrt(1-alpha_t)*noise
 
-    def log_tensor_as_image(self,tag, batch):
+        return xt, None
+
+        
+
+        
+
+    def log_batch_as_image_grid(self,tag, batch, first_batch_only=False):
+
+        if first_batch_only and self.current_batch > 0:
+            return
+
         nrows = 3
         ncols = 3
         n = nrows*ncols
