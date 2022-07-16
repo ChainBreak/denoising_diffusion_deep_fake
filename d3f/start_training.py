@@ -127,12 +127,15 @@ class LitTrainer(pl.LightningModule):
         this_fake_batch = self.iteratively_remove_error(this_model, this_batch, steps)
         other_fake_batch = self.iteratively_remove_error(other_model, this_batch, steps)
 
-        input_batch = self.randomly_interpolate_images(this_fake_batch, other_fake_batch)
-  
+        noise = torch.randn_like(this_batch)
+
+        input_batch = self.randomly_interpolate_images(
+            noise, 
+            self.randomly_interpolate_images(this_fake_batch, other_fake_batch)
+        )
+
         error_prediction = this_model(input_batch)
-
         target_batch = input_batch - this_batch
-
         loss = self.mse_loss(error_prediction, target_batch)
 
         self.log_batch_as_image_grid(f"this_fake_batch/{name}_to_{name}", this_fake_batch, first_batch_only=True)
