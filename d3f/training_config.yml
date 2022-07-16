@@ -4,7 +4,8 @@ num_workers: 8
 encoder_name: "resnet34"
 
 noise_blend_ratio: 1.0
-number_denoising_steps: 10
+number_error_removal_steps: 10
+error_step_scale: 0.1
 
 data_path_a: "/home/thomas/datasets/denoising_diffusion_deep_fake/tom_w128_h128"
 mean_a: [128,128,128]

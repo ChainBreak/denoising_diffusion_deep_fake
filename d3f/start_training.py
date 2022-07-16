@@ -7,6 +7,7 @@ import segmentation_models_pytorch
 import torch
 from torch import sqrt
 import torch.nn as nn
+import torch.nn.functional as F
 from torch.utils.data import DataLoader
 import torchvision.transforms as T
 import torchvision
@@ -118,76 +119,63 @@ class LitTrainer(pl.LightningModule):
 
 
     def training_step_for_one_model(self,name, this_model, this_batch, other_model,):
-        
-        this_noisy_batch = self.blend_images_with_noise(this_batch)
+        b,c,h,w = this_batch.shape
 
-        other_fake_batch = self.iteratively_denoise_image(other_model, this_noisy_batch)
+        this_fake_batch = self.iteratively_remove_error(this_model, this_batch)
+        other_fake_batch = self.iteratively_remove_error(other_model, this_batch)
+  
 
-        target_noise = self.blend_images_with_noise(other_fake_batch)
+        input_batch = self.randomly_interpolate_images(this_fake_batch, other_fake_batch)
 
-        input_batch,time = self.create_diffusion_samples(this_batch, target_noise)
+        input_batch = F.instance_norm(input_batch)
 
-        noise_prediction = this_model(input_batch)
+        error_prediction = this_model(input_batch)
 
-        loss = self.mse_loss(noise_prediction, target_noise)
+        target_batch = input_batch - this_batch
 
-        self.log_batch_as_image_grid(f"noise_batch/{name}", this_noisy_batch, first_batch_only=True)
-        self.log_batch_as_image_grid(f"fake_batch/{name}_to_other", other_fake_batch, first_batch_only=True)
-        self.log_batch_as_image_grid(f"target_noise/{name}", target_noise, first_batch_only=True)
+        loss = self.mse_loss(error_prediction, target_batch)
+
+        self.log_batch_as_image_grid(f"this_fake_batch/{name}_to_{name}", this_fake_batch, first_batch_only=True)
+        self.log_batch_as_image_grid(f"other_fake_batch/{name}_to_other", other_fake_batch, first_batch_only=True)
         self.log_batch_as_image_grid(f"model_input/{name}", input_batch, first_batch_only=True)
-        self.log_batch_as_image_grid(f"predicted_noise/{name}", noise_prediction, first_batch_only=True)
+        self.log_batch_as_image_grid(f"target_batch/{name}", target_batch, first_batch_only=True)
+        self.log_batch_as_image_grid(f"error_prediction/{name}", error_prediction, first_batch_only=True)
 
         return loss
 
-    def blend_images_with_noise(self,batch):
-        p = self.hparams
-
-        r = p.noise_blend_ratio
-
-        noise = torch.randn_like(batch)
-
-        noisy_batch = math.sqrt(1-r) * batch + math.sqrt(r) * noise
-
-        return noisy_batch
 
 
-    def iteratively_denoise_image(self,model, xt):
+    def iteratively_remove_error(self,model, image):
         
         with torch.no_grad():
             p = self.hparams
 
-            steps = p.number_denoising_steps
-
-            alpha_t_list = torch.linspace(1, 0, steps+1, device=self.device)
+            steps = p.number_error_removal_steps
+            step_scale = p.error_step_scale
 
             for i in range(steps):
 
-                alpha_t = alpha_t_list[i]
-                next_alpha_t = alpha_t_list[1+1]
+                error_prediction = model(image)
 
-                noise_prediction = model(xt)
+                image -= error_prediction * step_scale
 
-                x_scale = sqrt(next_alpha_t) / sqrt(alpha_t)
+                image = image.clamp(-1,1)
 
-                noise_scale = ( sqrt(alpha_t) * sqrt(1-next_alpha_t) - sqrt(next_alpha_t) * sqrt(1-alpha_t) ) / sqrt(alpha_t)
-                
-                xt =  x_scale * xt + noise_scale * noise_prediction
+                # self.log_batch_as_image_grid(f"removal/{i}_to_other", image, first_batch_only=True)
 
-                xt = xt.clamp(-1,1)
+            return image
 
-            return xt
-
-    def create_diffusion_samples(self, x0, noise):
-        b,c,h,w = x0.shape
+    def randomly_interpolate_images(self, image1, image2):
+        b,c,h,w = image1.shape
 
         alpha_t = torch.rand(
             size=(b,1,1,1),
             device=self.device,
         )
 
-        xt = sqrt(alpha_t) * x0 + sqrt(1-alpha_t)*noise
+        image = sqrt(alpha_t) * image1 + sqrt(1-alpha_t)*image2
 
-        return xt, None
+        return image
 
         
     def log_batch_as_image_grid(self,tag, batch, first_batch_only=False):
