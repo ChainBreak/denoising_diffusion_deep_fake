@@ -1,6 +1,7 @@
 import d3f
 import math
 import yaml
+import random
 import argparse
 import pytorch_lightning as pl
 import segmentation_models_pytorch
@@ -121,14 +122,13 @@ class LitTrainer(pl.LightningModule):
     def training_step_for_one_model(self,name, this_model, this_batch, other_model,):
         b,c,h,w = this_batch.shape
 
-        this_fake_batch = self.iteratively_remove_error(this_model, this_batch)
-        other_fake_batch = self.iteratively_remove_error(other_model, this_batch)
-  
+        steps = self.get_max_error_removal_steps_from_shedule()
+
+        this_fake_batch = self.iteratively_remove_error(this_model, this_batch, steps)
+        other_fake_batch = self.iteratively_remove_error(other_model, this_batch, steps)
 
         input_batch = self.randomly_interpolate_images(this_fake_batch, other_fake_batch)
-
-        input_batch = F.instance_norm(input_batch)
-
+  
         error_prediction = this_model(input_batch)
 
         target_batch = input_batch - this_batch
@@ -143,14 +143,26 @@ class LitTrainer(pl.LightningModule):
 
         return loss
 
+    def get_max_error_removal_steps_from_shedule(self):
+        start_epoch = 0
+        end_epoch = 50
 
+        start_steps = 2
+        end_steps = 20
 
-    def iteratively_remove_error(self,model, image):
+        epoch = self.current_epoch
+
+        steps = int((epoch-start_epoch) / (end_epoch-start_epoch) * (end_steps-start_steps) + start_steps)
+
+        self.log("noise_removal_steps_schedule",steps)
+
+        return steps
+
+    def iteratively_remove_error(self,model, image, steps):
         
         with torch.no_grad():
             p = self.hparams
 
-            steps = p.number_error_removal_steps
             step_scale = p.error_step_scale
 
             for i in range(steps):
