@@ -81,7 +81,7 @@ class LitTrainer(pl.LightningModule):
         p = self.hparams
         encoder_name = p["encoder_name"]
 
-        model = segmentation_models_pytorch.FPN(
+        model = segmentation_models_pytorch.Unet(
             encoder_name=encoder_name,
             encoder_weights=None,
             in_channels=3,
