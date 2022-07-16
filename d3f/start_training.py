@@ -1,9 +1,11 @@
 import d3f
+import math
 import yaml
 import argparse
 import pytorch_lightning as pl
 import segmentation_models_pytorch
 import torch
+from torch import sqrt
 import torch.nn as nn
 from torch.utils.data import DataLoader
 import torchvision.transforms as T
@@ -50,7 +52,6 @@ class LitTrainer(pl.LightningModule):
   
         return {"a":dataloader_a, "b":dataloader_b}
 
-
     def create_dataloader(self, path, mean, std):
         p = self.hparams
 
@@ -72,7 +73,6 @@ class LitTrainer(pl.LightningModule):
         
         return dataloader
 
-
     def create_model_instance(self):
         p = self.hparams
         encoder_name = p["encoder_name"]
@@ -86,6 +86,12 @@ class LitTrainer(pl.LightningModule):
         )
         return model
 
+    def configure_optimizers(self):
+        p = self.hparams
+        optimizer_a = torch.optim.Adam(self.model_a.parameters(), lr=p.learning_rate)
+        optimizer_b = torch.optim.Adam(self.model_b.parameters(), lr=p.learning_rate)
+        return [optimizer_a, optimizer_b]
+
     def training_step(self, batch, batch_idx, optimizer_idx):
         p = self.hparams
 
@@ -93,33 +99,90 @@ class LitTrainer(pl.LightningModule):
         batch_b = batch["b"]
 
         if batch_idx == 0 :
-            self.log_tensor_as_image("raw/datset_a", batch_a, p.mean_a, p.std_a)
-            self.log_tensor_as_image("raw/datset_b", batch_b, p.mean_b, p.std_b)
+            self.log_tensor_as_image("dataset/a", batch_a)
+            self.log_tensor_as_image("dataset/b", batch_b)
 
         if optimizer_idx == 0:
+            self.training_step_for_one_model( self.model_a, batch_a, self.model_b)
             
-            pred = self.model_a(batch_a)
         if optimizer_idx == 1:
-            pred = self.model_b(batch_b)
-        return pred.sum()
+            self.training_step_for_one_model( self.model_b, batch_b, self.model_a)
+            
+        return 
 
-    def configure_optimizers(self):
+
+    def training_step_for_one_model(self, this_model, this_batch, other_model):
+        
+        this_noisy_batch = self.blend_images_with_noise(this_batch)
+
+        self.log_tensor_as_image("this_noise_batch/a", this_noisy_batch)
+
+        other_fake_batch = self.iteratively_denoise_image(other_model, this_noisy_batch)
+
+        self.log_tensor_as_image("other_fake_batch/a", other_fake_batch)
+
+        target_noise = self.blend_images_with_noise(other_fake_batch)
+
+        self.log_tensor_as_image("target_noise/a", target_noise)
+
+        # input_batch, times = self.create_diffusion_samples(this_batch, target_noise)
+
+        # noise_prediction = this_model(input_batch)
+
+        # loss = self.mse_loss(noise_prediction, target_noise)
+
+        return loss
+
+    def blend_images_with_noise(self,batch):
         p = self.hparams
-        optimizer_a = torch.optim.Adam(self.model_a.parameters(), lr=p.learning_rate)
-        optimizer_b = torch.optim.Adam(self.model_b.parameters(), lr=p.learning_rate)
-        return [optimizer_a, optimizer_b]
 
-    def log_tensor_as_image(self,tag, batch, mean, std):
+        r = p.noise_blend_ratio
+
+        noise = torch.randn_like(batch)
+
+        noisy_batch = math.sqrt(1-r) * batch + math.sqrt(r) * noise
+
+        return noisy_batch
+
+
+    def iteratively_denoise_image(self,model, xt):
+        
+        with torch.no_grad():
+            p = self.hparams
+
+            steps = p.number_denoising_steps
+
+            alpha_t_list = torch.linspace(1, 0, steps+1, device=self.device)
+
+            for i in range(steps):
+
+                alpha_t = alpha_t_list[i]
+                next_alpha_t = alpha_t_list[1+1]
+
+                noise_prediction = model(xt)
+
+                x_scale = sqrt(next_alpha_t) / sqrt(alpha_t)
+
+                noise_scale = ( sqrt(alpha_t) * sqrt(1-next_alpha_t) - sqrt(next_alpha_t) * sqrt(1-alpha_t) ) / sqrt(alpha_t)
+                
+                xt =  x_scale * xt + noise_scale * noise_prediction
+
+                xt = xt.clamp(-1,1)
+
+            return xt
+
+
+
+
+    def log_tensor_as_image(self,tag, batch):
         nrows = 3
         ncols = 3
         n = nrows*ncols
 
         image = torchvision.utils.make_grid(batch[:n], nrows)
 
-        image *= torch.tensor(mean).reshape(3,1,1).to(self.device)
-        image += torch.tensor(std).reshape(3,1,1).to(self.device)
-        image /= 255
-
+        image *= 0.5
+        image += 0.5
         image = image.clamp(0,1)
 
         self.logger.experiment.add_image( tag, image, self.current_epoch)
