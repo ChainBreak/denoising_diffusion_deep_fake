@@ -3,8 +3,8 @@ learning_rate: 0.001
 num_workers: 8
 encoder_name: "resnet34"
 
-noise_blend_ratio: 0.3
-number_denoising_steps: 5
+noise_blend_ratio: 0.8
+number_denoising_steps: 20
 
 data_path_a: "/home/thomas/datasets/denoising_diffusion_deep_fake/tom_w128_h128"
 mean_a: [128,128,128]

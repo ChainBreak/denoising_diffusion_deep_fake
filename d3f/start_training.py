@@ -103,14 +103,16 @@ class LitTrainer(pl.LightningModule):
         batch_a = batch["a"]
         batch_b = batch["b"]
 
-        self.log_batch_as_image_grid("dataset/a", batch_a, first_batch_only=True)
-        self.log_batch_as_image_grid("dataset/b", batch_b, first_batch_only=True)
-
+    
         if optimizer_idx == 0:
+            self.log_batch_as_image_grid("dataset/a", batch_a, first_batch_only=True)
             loss = self.training_step_for_one_model("a", self.model_a, batch_a, self.model_b)
+            self.log("loss/train_a",loss)
             
         if optimizer_idx == 1:
+            self.log_batch_as_image_grid("dataset/b", batch_b, first_batch_only=True)
             loss = self.training_step_for_one_model("b", self.model_b, batch_b, self.model_a)
+            self.log("loss/train_b",loss)
             
         return loss
 
@@ -188,9 +190,6 @@ class LitTrainer(pl.LightningModule):
         return xt, None
 
         
-
-        
-
     def log_batch_as_image_grid(self,tag, batch, first_batch_only=False):
 
         if first_batch_only and self.current_batch > 0:
