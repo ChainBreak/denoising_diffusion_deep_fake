@@ -1,9 +1,10 @@
-batch_size: 64
+batch_size: 32
 learning_rate: 0.001
 num_workers: 8
 encoder_name: "resnet34"
 
-error_step_scale: 0.5
+number_of_fake_generation_steps: 20
+fake_generation_step_size: 2.0
 
 data_path_a: "/home/thomas/datasets/denoising_diffusion_deep_fake/tom_w128_h128"
 mean_a: [128,128,128]

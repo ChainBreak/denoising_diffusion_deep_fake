@@ -43,10 +43,7 @@ class LitTrainer(pl.LightningModule):
         
         self.save_hyperparameters()
             
-        self.model_a = self.create_model_instance()
-        self.model_b = self.create_model_instance()
-
-        self.mse_loss = nn.MSELoss()
+        self.model = self.create_model_instance()
 
         self.current_batch = 0
 
@@ -80,42 +77,127 @@ class LitTrainer(pl.LightningModule):
         return dataloader
 
     def create_model_instance(self):
-        p = self.hparams
-        encoder_name = p["encoder_name"]
+        number_of_classes = 2
+        output_size = 2 + number_of_classes
 
-        model = segmentation_models_pytorch.Unet(
-            encoder_name=encoder_name,
-            encoder_weights=None,
-            in_channels=3,
-            classes=3,
-            activation=None,
+        model = torchvision.models.resnet34(
+            num_classes=output_size,
         )
+
         return model
 
     def configure_optimizers(self):
         p = self.hparams
-        optimizer_a = torch.optim.Adam(self.model_a.parameters(), lr=p.learning_rate)
-        optimizer_b = torch.optim.Adam(self.model_b.parameters(), lr=p.learning_rate)
-        return [optimizer_a, optimizer_b]
+        optimizer = torch.optim.Adam(self.model.parameters(), lr=p.learning_rate)
+        return optimizer
 
-    def training_step(self, batch, batch_idx, optimizer_idx):
+    def training_step(self, batch, batch_idx):
         self.current_batch = batch_idx
         p = self.hparams
 
-        batch_a = batch["a"]
-        batch_b = batch["b"]
+        real_a = batch["a"]
+        real_b = batch["b"]
 
+        fake_a, fake_b = self.create_fakes_via_gradient_decent(real_a,real_b)
+
+
+        real_a_target = self.create_target_tensor_like(real_a, is_fake=False, class_index=0)
+        real_b_target = self.create_target_tensor_like(real_b, is_fake=False, class_index=1)
+        fake_a_target = self.create_target_tensor_like(fake_a, is_fake=True , class_index=0)
+        fake_b_target = self.create_target_tensor_like(fake_b, is_fake=True , class_index=1)
+
+        self.log_batch_as_image_grid(f"real_a", real_a, first_batch_only=True)
+        self.log_batch_as_image_grid(f"real_b", real_b, first_batch_only=True)
+        self.log_batch_as_image_grid(f"fake_a", fake_a, first_batch_only=True)
+        self.log_batch_as_image_grid(f"fake_b", fake_b, first_batch_only=True)
+        
+
+        input_tensor = torch.concat(
+            (real_a, real_b, fake_a, fake_b),
+            dim=0,
+        )
+
+        target_tensor = torch.concat(
+            (real_a_target, real_b_target, fake_a_target, fake_b_target),
+            dim=0,
+        )
+
+        output_tensor = self.model(input_tensor)
+
+        loss = self.descriminator_loss(output_tensor,target_tensor)
+
+        self.log("loss",loss)
+        
+        return loss
+
+    def create_fakes_via_gradient_decent(self,real_a,real_b):
+        p = self.hparams
+
+        batch_size_a = real_a.shape[0]
+        batch_size_b = real_b.shape[0]
+
+        # Targets are a real images with the other items class
+        target_a = self.create_target_tensor_like(real_a, is_fake=False, class_index=1)
+        target_b = self.create_target_tensor_like(real_b, is_fake=False, class_index=0)
+
+        input_tensor = torch.concat(
+            (real_a, real_b),
+            dim=0,
+        )
+
+        target_tensor = torch.concat(
+            (target_a, target_b),
+            dim=0,
+        )
+
+        input_tensor.requires_grad_()
+
+        for i in range(p.number_of_fake_generation_steps):
+
+            model_output = self.model(input_tensor)
+
+            loss = self.descriminator_loss(model_output, target_tensor)
     
-        if optimizer_idx == 0:
-            self.log_batch_as_image_grid("dataset/a", batch_a, first_batch_only=True)
-            loss = self.training_step_for_one_model("a", self.model_a, batch_a, self.model_b)
-            self.log("loss/train_a",loss)
+            loss.backward()
+
+            with torch.no_grad():
+                input_tensor += p.fake_generation_step_size * input_tensor.grad
             
-        if optimizer_idx == 1:
-            self.log_batch_as_image_grid("dataset/b", batch_b, first_batch_only=True)
-            loss = self.training_step_for_one_model("b", self.model_b, batch_b, self.model_a)
-            self.log("loss/train_b",loss)
-            
+            input_tensor.grad.zero_()
+
+
+        fake_b = input_tensor.detach()[:batch_size_a ]
+        fake_a = input_tensor.detach()[ batch_size_a:]
+
+        return fake_a, fake_b
+
+
+
+    def create_target_tensor_like(self,batch, is_fake, class_index):
+        b = batch.shape[0]
+        device = batch.device
+
+        target_tensor = torch.tensor(
+            [[is_fake ,class_index]],
+            device=device,
+        )
+        target_tensor = target_tensor.repeat(b,1)
+
+        return target_tensor # [b,2]
+
+    def descriminator_loss(self, input_tensor , label_tensor ):
+    
+        is_fake_tensor = input_tensor[:,:2]
+        class_tensor = input_tensor[:,2:]
+
+        is_fake_labels = label_tensor[:,0]
+        class_labels = label_tensor[:,1]
+
+        loss_is_fake = F.cross_entropy(is_fake_tensor, is_fake_labels)
+        loss_class = F.cross_entropy(class_tensor, class_labels)
+
+        loss = loss_is_fake + loss_class
+
         return loss
 
 
