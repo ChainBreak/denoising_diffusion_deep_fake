@@ -106,10 +106,10 @@ class LitTrainer(pl.LightningModule):
         fake_a_target = self.create_target_tensor_like(fake_a, is_fake=True , class_index=0)
         fake_b_target = self.create_target_tensor_like(fake_b, is_fake=True , class_index=1)
 
-        self.log_batch_as_image_grid(f"real_a", real_a, first_batch_only=True)
-        self.log_batch_as_image_grid(f"real_b", real_b, first_batch_only=True)
-        self.log_batch_as_image_grid(f"fake_a", fake_a, first_batch_only=True)
-        self.log_batch_as_image_grid(f"fake_b", fake_b, first_batch_only=True)
+        self.log_batch_as_image_grid(f"real_a", real_a, first_batch_only=False)
+        self.log_batch_as_image_grid(f"real_b", real_b, first_batch_only=False)
+        self.log_batch_as_image_grid(f"fake_a", fake_a, first_batch_only=False)
+        self.log_batch_as_image_grid(f"fake_b", fake_b, first_batch_only=False)
         
 
         input_tensor = torch.concat(
@@ -171,8 +171,6 @@ class LitTrainer(pl.LightningModule):
 
         return fake_a, fake_b
 
-
-
     def create_target_tensor_like(self,batch, is_fake, class_index):
         b = batch.shape[0]
         device = batch.device
@@ -199,78 +197,6 @@ class LitTrainer(pl.LightningModule):
         loss = loss_is_fake + loss_class
 
         return loss
-
-
-    def training_step_for_one_model(self,name, this_model, this_batch, other_model,):
-        b,c,h,w = this_batch.shape
-
-        steps = 10
-
-        noise = torch.randn_like(this_batch)
-
-        input_batch = self.randomly_interpolate_images(noise, this_batch)
-
-        other_fake_batch = self.iteratively_remove_error(other_model, input_batch, steps)
-
-        error_prediction = this_model(input_batch)
-        target_batch = input_batch - this_batch
-        loss = self.mse_loss(error_prediction, target_batch)
-
-        self.log_batch_as_image_grid(f"other_fake_batch/{name}_to_other", other_fake_batch, first_batch_only=True)
-        self.log_batch_as_image_grid(f"model_input/{name}", input_batch, first_batch_only=True)
-        self.log_batch_as_image_grid(f"target_batch/{name}", target_batch, first_batch_only=True)
-        self.log_batch_as_image_grid(f"error_prediction/{name}", error_prediction, first_batch_only=True)
-
-        return loss
-
-    def get_max_error_removal_steps_from_shedule(self):
-        start_epoch = 0
-        end_epoch = 50
-
-        start_steps = 2
-        end_steps = 20
-
-        epoch = self.current_epoch
-
-        steps = int((epoch-start_epoch) / (end_epoch-start_epoch) * (end_steps-start_steps) + start_steps)
-
-        self.log("noise_removal_steps_schedule",steps)
-
-        return steps
-
-    def iteratively_remove_error(self,model, image, steps):
-        
-        with torch.no_grad():
-            p = self.hparams
-
-            image = image.clone()
-
-            step_scale = p.error_step_scale
-
-            for i in range(steps):
-
-                error_prediction = model(image)
-
-                image -= error_prediction * step_scale
-
-                image = image.clamp(-1,1)
-
-                # self.log_batch_as_image_grid(f"removal/{i}_to_other", image, first_batch_only=True)
-
-            return image
-
-    def randomly_interpolate_images(self, image1, image2):
-        b,c,h,w = image1.shape
-
-        alpha_t = torch.rand(
-            size=(b,1,1,1),
-            device=self.device,
-        )
-
-        image = sqrt(alpha_t) * image1 + sqrt(1-alpha_t)*image2
-
-        return image
-
         
     def log_batch_as_image_grid(self,tag, batch, first_batch_only=False):
 
