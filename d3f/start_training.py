@@ -122,23 +122,18 @@ class LitTrainer(pl.LightningModule):
     def training_step_for_one_model(self,name, this_model, this_batch, other_model,):
         b,c,h,w = this_batch.shape
 
-        steps = self.get_max_error_removal_steps_from_shedule()
-
-        this_fake_batch = self.iteratively_remove_error(this_model, this_batch, steps)
-        other_fake_batch = self.iteratively_remove_error(other_model, this_batch, steps)
+        steps = 10
 
         noise = torch.randn_like(this_batch)
 
-        input_batch = self.randomly_interpolate_images(
-            noise, 
-            self.randomly_interpolate_images(this_fake_batch, other_fake_batch)
-        )
+        input_batch = self.randomly_interpolate_images(noise, this_batch)
+
+        other_fake_batch = self.iteratively_remove_error(other_model, input_batch, steps)
 
         error_prediction = this_model(input_batch)
         target_batch = input_batch - this_batch
         loss = self.mse_loss(error_prediction, target_batch)
 
-        self.log_batch_as_image_grid(f"this_fake_batch/{name}_to_{name}", this_fake_batch, first_batch_only=True)
         self.log_batch_as_image_grid(f"other_fake_batch/{name}_to_other", other_fake_batch, first_batch_only=True)
         self.log_batch_as_image_grid(f"model_input/{name}", input_batch, first_batch_only=True)
         self.log_batch_as_image_grid(f"target_batch/{name}", target_batch, first_batch_only=True)
@@ -165,6 +160,8 @@ class LitTrainer(pl.LightningModule):
         
         with torch.no_grad():
             p = self.hparams
+
+            image = image.clone()
 
             step_scale = p.error_step_scale
 
