@@ -100,11 +100,10 @@ class LitTrainer(pl.LightningModule):
 
         fake_a, fake_b = self.create_fakes_via_gradient_decent(real_a,real_b)
 
-
         real_a_target = self.create_target_tensor_like(real_a, is_fake=False, class_index=0)
         real_b_target = self.create_target_tensor_like(real_b, is_fake=False, class_index=1)
-        fake_a_target = self.create_target_tensor_like(fake_a, is_fake=True , class_index=0)
-        fake_b_target = self.create_target_tensor_like(fake_b, is_fake=True , class_index=1)
+        fake_a_target = self.create_target_tensor_like(fake_a, is_fake=True , class_index=None)
+        fake_b_target = self.create_target_tensor_like(fake_b, is_fake=True , class_index=None)
 
         self.log_batch_as_image_grid(f"a/real", real_a, first_batch_only=True)
         self.log_batch_as_image_grid(f"b/real", real_b, first_batch_only=True)
@@ -177,6 +176,12 @@ class LitTrainer(pl.LightningModule):
         b = batch.shape[0]
         device = batch.device
 
+        if is_fake is None:
+            is_fake = -1
+
+        if class_index is None:
+            class_index = -1
+
         target_tensor = torch.tensor(
             [[is_fake ,class_index]],
             device=device,
@@ -193,8 +198,8 @@ class LitTrainer(pl.LightningModule):
         is_fake_labels = label_tensor[:,0]
         class_labels = label_tensor[:,1]
 
-        loss_is_fake = F.cross_entropy(is_fake_tensor, is_fake_labels)
-        loss_class = F.cross_entropy(class_tensor, class_labels)
+        loss_is_fake = F.cross_entropy(is_fake_tensor, is_fake_labels, ignore_index=-1)
+        loss_class = F.cross_entropy(class_tensor, class_labels, ignore_index=-1)
 
         loss = loss_is_fake + loss_class
 
