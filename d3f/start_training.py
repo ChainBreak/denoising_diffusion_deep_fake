@@ -46,8 +46,6 @@ class LitTrainer(pl.LightningModule):
             
         self.model = self.create_model_instance()
 
-        self.current_batch = 0
-
     def train_dataloader(self):
         p = self.hparams
 
@@ -99,7 +97,7 @@ class LitTrainer(pl.LightningModule):
         return optimizer
 
     def training_step(self, batch, batch_idx):
-        self.current_batch = batch_idx
+
         p = self.hparams
 
         real_a = batch["a"]
@@ -112,10 +110,10 @@ class LitTrainer(pl.LightningModule):
         fake_a_target = self.create_target_tensor_like(fake_a, is_fake=True , class_index=None)
         fake_b_target = self.create_target_tensor_like(fake_b, is_fake=True , class_index=None)
 
-        self.log_batch_as_image_grid(f"real/a", real_a, first_batch_only=True)
-        self.log_batch_as_image_grid(f"real/b", real_b, first_batch_only=True)
-        self.log_batch_as_image_grid(f"fake/a", fake_a, first_batch_only=True)
-        self.log_batch_as_image_grid(f"fake/b", fake_b, first_batch_only=True)
+        self.log_batch_as_image_grid(f"real/a", real_a)
+        self.log_batch_as_image_grid(f"real/b", real_b)
+        self.log_batch_as_image_grid(f"fake/a", fake_a)
+        self.log_batch_as_image_grid(f"fake/b", fake_b)
         
 
         input_tensor = torch.concat(
@@ -167,10 +165,17 @@ class LitTrainer(pl.LightningModule):
 
             loss_is_fake, loss_class = self.descriminator_loss(model_output, target_tensor)
 
-            print(loss_is_fake.item(), loss_class.item())
 
             loss = loss_is_fake + loss_class
             loss.backward()
+
+            grad_abs = input_tensor.grad.abs()
+            grad_mean = grad_abs.mean()
+            grad_max = grad_abs.max()
+            grad_min = grad_abs.min()
+
+            print(f"fake={loss_is_fake.item():8f} class={loss_class.item():8f} grad_min={grad_min.item():8f} grad_mean={grad_mean.item():8f}  grad_max={grad_max.item():8f}")
+          
 
             with torch.no_grad():
                 input_tensor -= p.fake_generation_step_size * input_tensor.grad
@@ -216,22 +221,20 @@ class LitTrainer(pl.LightningModule):
 
         return loss_is_fake, loss_class
         
-    def log_batch_as_image_grid(self,tag, batch, first_batch_only=False):
+    def log_batch_as_image_grid(self,tag, batch):
 
-        if first_batch_only and self.current_batch > 0:
-            return
+        if self.global_step % 10 == 0:
+            nrows = 3
+            ncols = 3
+            n = nrows*ncols
 
-        nrows = 3
-        ncols = 3
-        n = nrows*ncols
+            image = torchvision.utils.make_grid(batch[:n], nrows)
 
-        image = torchvision.utils.make_grid(batch[:n], nrows)
+            image *= 0.5
+            image += 0.5
+            image = image.clamp(0,1)
 
-        image *= 0.5
-        image += 0.5
-        image = image.clamp(0,1)
-
-        self.logger.experiment.add_image( tag, image, self.current_epoch)
+            self.logger.experiment.add_image( tag, image, self.global_step)
         
 
 if __name__ == "__main__":
