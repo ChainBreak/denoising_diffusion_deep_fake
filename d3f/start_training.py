@@ -30,6 +30,7 @@ def start_training(hparams_dict):
     lit_trainer = LitTrainer(**hparams_dict)
     trainer = pl.Trainer(
         gpus=1,
+        log_every_n_steps=1,
         )
 
     trainer.fit(
@@ -77,11 +78,17 @@ class LitTrainer(pl.LightningModule):
         return dataloader
 
     def create_model_instance(self):
+        p = self.hparams
+
         number_of_classes = 2
         output_size = 2 + number_of_classes
 
-        model = torchvision.models.resnet34(
-            num_classes=output_size,
+        model = segmentation_models_pytorch.Unet(
+            encoder_name=p.encoder_name,
+            encoder_weights=None,
+            in_channels=3,
+            classes=output_size,
+            activation=None,
         )
 
         return model
@@ -105,10 +112,10 @@ class LitTrainer(pl.LightningModule):
         fake_a_target = self.create_target_tensor_like(fake_a, is_fake=True , class_index=None)
         fake_b_target = self.create_target_tensor_like(fake_b, is_fake=True , class_index=None)
 
-        self.log_batch_as_image_grid(f"a/real", real_a, first_batch_only=True)
-        self.log_batch_as_image_grid(f"b/real", real_b, first_batch_only=True)
-        self.log_batch_as_image_grid(f"a/fake", fake_a, first_batch_only=True)
-        self.log_batch_as_image_grid(f"b/fake", fake_b, first_batch_only=True)
+        self.log_batch_as_image_grid(f"real/a", real_a, first_batch_only=True)
+        self.log_batch_as_image_grid(f"real/b", real_b, first_batch_only=True)
+        self.log_batch_as_image_grid(f"fake/a", fake_a, first_batch_only=True)
+        self.log_batch_as_image_grid(f"fake/b", fake_b, first_batch_only=True)
         
 
         input_tensor = torch.concat(
@@ -123,11 +130,14 @@ class LitTrainer(pl.LightningModule):
 
         output_tensor = self.model(input_tensor)
 
-        loss = self.descriminator_loss(output_tensor,target_tensor)
+        loss_is_fake, loss_class = self.descriminator_loss(output_tensor,target_tensor)
 
-        self.log("loss",loss)
+        loss_is_fake, loss_class
+
+        self.log("loss_is_fake",loss_is_fake)
+        self.log("loss_class",loss_class)
         
-        return loss
+        return loss_is_fake + loss_class
 
     def create_fakes_via_gradient_decent(self,real_a,real_b):
         p = self.hparams
@@ -150,13 +160,16 @@ class LitTrainer(pl.LightningModule):
         )
 
         input_tensor.requires_grad_()
-
+        print()
         for i in range(p.number_of_fake_generation_steps):
 
             model_output = self.model(input_tensor)
 
-            loss = self.descriminator_loss(model_output, target_tensor)
-    
+            loss_is_fake, loss_class = self.descriminator_loss(model_output, target_tensor)
+
+            print(loss_is_fake.item(), loss_class.item())
+
+            loss = loss_is_fake + loss_class
             loss.backward()
 
             with torch.no_grad():
@@ -173,7 +186,7 @@ class LitTrainer(pl.LightningModule):
         return fake_a, fake_b
 
     def create_target_tensor_like(self,batch, is_fake, class_index):
-        b = batch.shape[0]
+        b,c,h,w = batch.shape
         device = batch.device
 
         if is_fake is None:
@@ -186,24 +199,22 @@ class LitTrainer(pl.LightningModule):
             [[is_fake ,class_index]],
             device=device,
         )
-        target_tensor = target_tensor.repeat(b,1)
+        target_tensor = target_tensor.reshape(1,2,1,1).repeat(b,1,h,w)
 
-        return target_tensor # [b,2]
+        return target_tensor # [b,2,h,w]
 
     def descriminator_loss(self, input_tensor , label_tensor ):
     
-        is_fake_tensor = input_tensor[:,:2]
-        class_tensor = input_tensor[:,2:]
+        is_fake_tensor = input_tensor[:,:2,:,:]
+        class_tensor = input_tensor[:,2:,:,:]
 
-        is_fake_labels = label_tensor[:,0]
-        class_labels = label_tensor[:,1]
+        is_fake_labels = label_tensor[:,0,:,:]
+        class_labels = label_tensor[:,1,:,:]
 
         loss_is_fake = F.cross_entropy(is_fake_tensor, is_fake_labels, ignore_index=-1)
         loss_class = F.cross_entropy(class_tensor, class_labels, ignore_index=-1)
 
-        loss = loss_is_fake + loss_class
-
-        return loss
+        return loss_is_fake, loss_class
         
     def log_batch_as_image_grid(self,tag, batch, first_batch_only=False):
 
