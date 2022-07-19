@@ -130,8 +130,6 @@ class LitTrainer(pl.LightningModule):
 
         loss_is_fake, loss_class = self.descriminator_loss(output_tensor,target_tensor)
 
-        loss_is_fake, loss_class
-
         self.log("loss_is_fake",loss_is_fake)
         self.log("loss_class",loss_class)
         
@@ -144,8 +142,8 @@ class LitTrainer(pl.LightningModule):
         batch_size_b = real_b.shape[0]
 
         # Targets are a real images with the other items class
-        target_a = self.create_target_tensor_like(real_a, is_fake=False, class_index=1)
-        target_b = self.create_target_tensor_like(real_b, is_fake=False, class_index=0)
+        target_a = self.create_target_tensor_like(real_a, is_fake=None, class_index=1)
+        target_b = self.create_target_tensor_like(real_b, is_fake=None, class_index=0)
 
         input_tensor = torch.concat(
             (real_a, real_b),
