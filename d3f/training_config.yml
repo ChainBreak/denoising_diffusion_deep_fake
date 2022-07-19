@@ -3,13 +3,13 @@ learning_rate: 0.001
 num_workers: 8
 encoder_name: "resnet18"
 
-number_of_fake_generation_steps: 10
-fake_generation_step_size: 1000.0
+number_of_fake_generation_steps: 20
+fake_generation_step_size: 10.0
 
 data_path_a: "/home/thomas/datasets/denoising_diffusion_deep_fake/tom_w128_h128"
-mean_a: [128,128,128]
-std_a: [128,128,128]
+mean_a: [0.5,0.5,0.5]
+std_a: [0.5,0.5,0.5]
 
 data_path_b: "/home/thomas/datasets/denoising_diffusion_deep_fake/georgia_w128_h128"
-mean_b: [128,128,128]
-std_b: [128,128,128]
+mean_b: [0.5,0.5,0.5]
+std_b: [0.5,0.5,0.5]

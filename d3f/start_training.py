@@ -12,7 +12,9 @@ import torch.nn.functional as F
 from torch.utils.data import DataLoader
 import torchvision.transforms as T
 import torchvision
+import albumentations as A
 from d3f.dataset.image_dataset import ImageDataset
+
 
 
 def main():
@@ -57,13 +59,13 @@ class LitTrainer(pl.LightningModule):
     def create_dataloader(self, path, mean, std):
         p = self.hparams
 
-        transform = nn.Sequential(
-            T.Normalize(mean,std),
-        )
+        albumentations_transform = self.build_albumentations_transform_pipeline()
 
         dataset = ImageDataset(
             path,
-            transform=transform,
+            mean=mean,
+            std=std,
+            albumentations_transform = albumentations_transform,
             )
 
         dataloader = DataLoader(
@@ -74,6 +76,34 @@ class LitTrainer(pl.LightningModule):
             )
         
         return dataloader
+
+    def build_albumentations_transform_pipeline(self):
+        return A.Compose([
+            # A.RandomRotate90(),
+            # A.Flip(),
+            # A.Transpose(),
+            A.OneOf([
+                # A.IAAAdditiveGaussianNoise(),
+                A.GaussNoise(),
+            ], p=0.2),
+            A.OneOf([
+                A.MotionBlur(p=.2),
+                A.MedianBlur(blur_limit=3, p=0.1),
+                A.Blur(blur_limit=3, p=0.1),
+            ], p=0.2),
+            A.ShiftScaleRotate(shift_limit=0.0, scale_limit=0.2, rotate_limit=10, p=0.2),
+            A.OneOf([
+                A.OpticalDistortion(p=0.3),
+                A.GridDistortion(p=.1),
+                # A.IAAPiecewiseAffine(p=0.3),
+            ], p=0.2),
+            A.OneOf([
+                A.CLAHE(clip_limit=2),
+
+                A.RandomBrightnessContrast(),            
+            ], p=0.3),
+            A.HueSaturationValue(hue_shift_limit=255,p=1.0),
+        ])
 
     def create_model_instance(self):
         p = self.hparams
@@ -100,29 +130,35 @@ class LitTrainer(pl.LightningModule):
 
         p = self.hparams
 
-        real_a = batch["a"]
-        real_b = batch["b"]
+        real_a = batch["a"]["raw_image"]
+        real_b = batch["b"]["raw_image"]
+        augm_a = batch["a"]["augmented_image"]
+        augm_b = batch["b"]["augmented_image"]
 
         fake_a, fake_b = self.create_fakes_via_gradient_decent(real_a,real_b)
 
-        real_a_target = self.create_target_tensor_like(real_a, is_fake=False, class_index=0)
-        real_b_target = self.create_target_tensor_like(real_b, is_fake=False, class_index=1)
+        augm_a_target = self.create_target_tensor_like(augm_a, is_fake=None, class_index=0)
+        augm_b_target = self.create_target_tensor_like(augm_b, is_fake=None, class_index=1)
+        real_a_target = self.create_target_tensor_like(real_a, is_fake=False, class_index=None)
+        real_b_target = self.create_target_tensor_like(real_b, is_fake=False, class_index=None)
         fake_a_target = self.create_target_tensor_like(fake_a, is_fake=True , class_index=None)
         fake_b_target = self.create_target_tensor_like(fake_b, is_fake=True , class_index=None)
 
         self.log_batch_as_image_grid(f"real/a", real_a)
         self.log_batch_as_image_grid(f"real/b", real_b)
+        self.log_batch_as_image_grid(f"augm/a", augm_a)
+        self.log_batch_as_image_grid(f"augm/b", augm_b)
         self.log_batch_as_image_grid(f"fake/a", fake_a)
         self.log_batch_as_image_grid(f"fake/b", fake_b)
         
 
         input_tensor = torch.concat(
-            (real_a, real_b, fake_a, fake_b),
+            (augm_a, augm_b, real_a, real_b, fake_a, fake_b),
             dim=0,
         )
 
         target_tensor = torch.concat(
-            (real_a_target, real_b_target, fake_a_target, fake_b_target),
+            (augm_a_target, augm_b_target, real_a_target, real_b_target, fake_a_target, fake_b_target),
             dim=0,
         )
 
@@ -142,8 +178,8 @@ class LitTrainer(pl.LightningModule):
         batch_size_b = real_b.shape[0]
 
         # Targets are a real images with the other items class
-        target_a = self.create_target_tensor_like(real_a, is_fake=None, class_index=1)
-        target_b = self.create_target_tensor_like(real_b, is_fake=None, class_index=0)
+        target_a = self.create_target_tensor_like(real_a, is_fake=False, class_index=1)
+        target_b = self.create_target_tensor_like(real_b, is_fake=False, class_index=0)
 
         input_tensor = torch.concat(
             (real_a, real_b),
