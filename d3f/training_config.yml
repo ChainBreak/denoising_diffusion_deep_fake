@@ -4,7 +4,8 @@ num_workers: 8
 encoder_name: "resnet18"
 
 number_of_fake_generation_steps: 20
-fake_generation_step_size: 10.0
+fake_generation_step_size: 100.0
+log_images_every_n_steps: 10
 
 data_path_a: "/home/thomas/datasets/denoising_diffusion_deep_fake/tom_w128_h128"
 mean_a: [0.5,0.5,0.5]

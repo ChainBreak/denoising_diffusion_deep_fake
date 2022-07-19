@@ -46,7 +46,8 @@ class LitTrainer(pl.LightningModule):
         
         self.save_hyperparameters()
             
-        self.model = self.create_model_instance()
+        self.class_model = self.create_model_instance()
+        self.is_fake_model = self.create_model_instance()
 
     def train_dataloader(self):
         p = self.hparams
@@ -85,7 +86,7 @@ class LitTrainer(pl.LightningModule):
             A.OneOf([
                 # A.IAAAdditiveGaussianNoise(),
                 A.GaussNoise(),
-            ], p=0.2),
+            ], p=0.6),
             A.OneOf([
                 A.MotionBlur(p=.2),
                 A.MedianBlur(blur_limit=3, p=0.1),
@@ -106,70 +107,83 @@ class LitTrainer(pl.LightningModule):
         ])
 
     def create_model_instance(self):
-        p = self.hparams
 
-        number_of_classes = 2
-        output_size = 2 + number_of_classes
-
-        model = segmentation_models_pytorch.Unet(
-            encoder_name=p.encoder_name,
-            encoder_weights=None,
-            in_channels=3,
-            classes=output_size,
-            activation=None,
+        model = torchvision.models.resnet18(
+            num_classes=2,
         )
 
         return model
 
     def configure_optimizers(self):
         p = self.hparams
-        optimizer = torch.optim.Adam(self.model.parameters(), lr=p.learning_rate)
-        return optimizer
+        optimizer_class = torch.optim.Adam(self.class_model.parameters(), lr=p.learning_rate)
+        optimizer_is_fake = torch.optim.Adam(self.is_fake_model.parameters(), lr=p.learning_rate)
+        return [optimizer_class, optimizer_is_fake]
 
-    def training_step(self, batch, batch_idx):
+    def training_step(self, batch, batch_idx, optimizer_idx):
 
-        p = self.hparams
+        if optimizer_idx == 0:
+            augm_a = batch["a"]["augmented_image"]
+            augm_b = batch["b"]["augmented_image"]
 
-        real_a = batch["a"]["raw_image"]
-        real_b = batch["b"]["raw_image"]
-        augm_a = batch["a"]["augmented_image"]
-        augm_b = batch["b"]["augmented_image"]
+            self.log_batch_as_image_grid(f"augm/a", augm_a)
+            self.log_batch_as_image_grid(f"augm/b", augm_b)
 
-        fake_a, fake_b = self.create_fakes_via_gradient_decent(real_a,real_b)
-
-        augm_a_target = self.create_target_tensor_like(augm_a, is_fake=None, class_index=0)
-        augm_b_target = self.create_target_tensor_like(augm_b, is_fake=None, class_index=1)
-        real_a_target = self.create_target_tensor_like(real_a, is_fake=False, class_index=None)
-        real_b_target = self.create_target_tensor_like(real_b, is_fake=False, class_index=None)
-        fake_a_target = self.create_target_tensor_like(fake_a, is_fake=True , class_index=None)
-        fake_b_target = self.create_target_tensor_like(fake_b, is_fake=True , class_index=None)
-
-        self.log_batch_as_image_grid(f"real/a", real_a)
-        self.log_batch_as_image_grid(f"real/b", real_b)
-        self.log_batch_as_image_grid(f"augm/a", augm_a)
-        self.log_batch_as_image_grid(f"augm/b", augm_b)
-        self.log_batch_as_image_grid(f"fake/a", fake_a)
-        self.log_batch_as_image_grid(f"fake/b", fake_b)
+            augm_a_target = self.create_target_tensor_like(augm_a, class_index=0)
+            augm_b_target = self.create_target_tensor_like(augm_b, class_index=1)
         
+            input_tensor = torch.concat(
+                (augm_a, augm_b),
+                dim=0,
+            )
 
-        input_tensor = torch.concat(
-            (augm_a, augm_b, real_a, real_b, fake_a, fake_b),
-            dim=0,
-        )
+            target_tensor = torch.concat(
+                (augm_a_target, augm_b_target),
+                dim=0,
+            )
 
-        target_tensor = torch.concat(
-            (augm_a_target, augm_b_target, real_a_target, real_b_target, fake_a_target, fake_b_target),
-            dim=0,
-        )
+            output_tensor = self.class_model(input_tensor)
 
-        output_tensor = self.model(input_tensor)
+            loss = self.descriminator_loss(output_tensor,target_tensor)
 
-        loss_is_fake, loss_class = self.descriminator_loss(output_tensor,target_tensor)
+            self.log("class_loss",loss)
 
-        self.log("loss_is_fake",loss_is_fake)
-        self.log("loss_class",loss_class)
+
+        if optimizer_idx == 1:
+            real_a = batch["a"]["raw_image"]
+            real_b = batch["b"]["raw_image"]
+
+            self.log_batch_as_image_grid(f"real/a", real_a)
+            self.log_batch_as_image_grid(f"real/b", real_b)
+       
+            fake_a, fake_b = self.create_fakes_via_gradient_decent(real_a,real_b)
+            self.log_batch_as_image_grid(f"fake/a", fake_a)
+            self.log_batch_as_image_grid(f"fake/b", fake_b)
+
+            real = torch.concat((real_a, real_b),dim=0)
+            fake = torch.concat((fake_a, fake_b),dim=0)
+
+            real_target = self.create_target_tensor_like(real, class_index=0)
+            fake_target = self.create_target_tensor_like(fake, class_index=1)
         
-        return loss_is_fake + loss_class
+            input_tensor = torch.concat(
+                (real, fake),
+                dim=0,
+            )
+
+            target_tensor = torch.concat(
+                (real_target, fake_target),
+                dim=0,
+            )
+
+            output_tensor = self.is_fake_model(input_tensor)
+
+            loss = self.descriminator_loss(output_tensor,target_tensor)
+
+            self.log("is_fake_loss",loss)
+        
+        
+        return loss
 
     def create_fakes_via_gradient_decent(self,real_a,real_b):
         p = self.hparams
@@ -178,8 +192,8 @@ class LitTrainer(pl.LightningModule):
         batch_size_b = real_b.shape[0]
 
         # Targets are a real images with the other items class
-        target_a = self.create_target_tensor_like(real_a, is_fake=False, class_index=1)
-        target_b = self.create_target_tensor_like(real_b, is_fake=False, class_index=0)
+        target_a = self.create_target_tensor_like(real_a, class_index=1)
+        target_b = self.create_target_tensor_like(real_b, class_index=0)
 
         input_tensor = torch.concat(
             (real_a, real_b),
@@ -191,16 +205,19 @@ class LitTrainer(pl.LightningModule):
             dim=0,
         )
 
+        real_target = self.create_target_tensor_like(input_tensor, class_index=0)
+
         input_tensor.requires_grad_()
         print()
         for i in range(p.number_of_fake_generation_steps):
 
-            model_output = self.model(input_tensor)
+            class_model_output = self.class_model(input_tensor)
+            is_fake_model_output = self.is_fake_model(input_tensor)
 
-            loss_is_fake, loss_class = self.descriminator_loss(model_output, target_tensor)
+            loss_class = self.descriminator_loss(class_model_output, target_tensor)
+            loss_is_fake = self.descriminator_loss(is_fake_model_output, real_target)
 
-
-            loss = loss_is_fake + loss_class
+            loss = loss_class + loss_is_fake
             loss.backward()
 
             grad_abs = input_tensor.grad.abs()
@@ -208,7 +225,7 @@ class LitTrainer(pl.LightningModule):
             grad_max = grad_abs.max()
             grad_min = grad_abs.min()
 
-            print(f"fake={loss_is_fake.item():8f} class={loss_class.item():8f} grad_min={grad_min.item():8f} grad_mean={grad_mean.item():8f}  grad_max={grad_max.item():8f}")
+            print(f"loss_is_fake={loss_is_fake.item():8f} loss_class={loss_class.item():8f} grad_min={grad_min.item():8f} grad_mean={grad_mean.item():8f}  grad_max={grad_max.item():8f}")
           
 
             with torch.no_grad():
@@ -216,7 +233,7 @@ class LitTrainer(pl.LightningModule):
             
             input_tensor.grad.zero_()
 
-        self.model.zero_grad()
+        self.class_model.zero_grad()
 
 
         fake_b = input_tensor.detach()[:batch_size_a ]
@@ -224,40 +241,26 @@ class LitTrainer(pl.LightningModule):
 
         return fake_a, fake_b
 
-    def create_target_tensor_like(self,batch, is_fake, class_index):
-        b,c,h,w = batch.shape
-        device = batch.device
-
-        if is_fake is None:
-            is_fake = -1
-
-        if class_index is None:
-            class_index = -1
-
+    def create_target_tensor_like(self,batch, class_index):
+        b = batch.shape[0]
+     
         target_tensor = torch.tensor(
-            [[is_fake ,class_index]],
-            device=device,
+            [class_index],
+            device=batch.device,
         )
-        target_tensor = target_tensor.reshape(1,2,1,1).repeat(b,1,h,w)
+        target_tensor = target_tensor.repeat(b)
 
-        return target_tensor # [b,2,h,w]
+        return target_tensor #[b]
 
     def descriminator_loss(self, input_tensor , label_tensor ):
-    
-        is_fake_tensor = input_tensor[:,:2,:,:]
-        class_tensor = input_tensor[:,2:,:,:]
 
-        is_fake_labels = label_tensor[:,0,:,:]
-        class_labels = label_tensor[:,1,:,:]
+        loss = F.cross_entropy(input_tensor, label_tensor, ignore_index=-1)
 
-        loss_is_fake = F.cross_entropy(is_fake_tensor, is_fake_labels, ignore_index=-1)
-        loss_class = F.cross_entropy(class_tensor, class_labels, ignore_index=-1)
-
-        return loss_is_fake, loss_class
+        return loss
         
     def log_batch_as_image_grid(self,tag, batch):
-
-        if self.global_step % 10 == 0:
+        p = self.hparams
+        if self.global_step % p.log_images_every_n_steps == 0:
             nrows = 3
             ncols = 3
             n = nrows*ncols
