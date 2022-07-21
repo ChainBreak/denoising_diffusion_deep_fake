@@ -100,7 +100,6 @@ class LitTrainer(pl.LightningModule):
         return [optimizer_a, optimizer_b]
 
     def training_step(self, batch, batch_idx, optimizer_idx):
-        self.current_batch = batch_idx
         p = self.hparams
 
         batch_a = batch["a"]
@@ -109,53 +108,82 @@ class LitTrainer(pl.LightningModule):
     
         if optimizer_idx == 0:
             self.log_batch_as_image_grid("dataset/a", batch_a, first_batch_only=True)
-            loss = self.training_step_for_one_model("a", self.model_a, batch_a, self.model_b)
+            loss = self.training_step_for_one_model("a", batch_a, self.model_a, self.model_b)
             self.log("loss/train_a",loss)
             
         if optimizer_idx == 1:
             self.log_batch_as_image_grid("dataset/b", batch_b, first_batch_only=True)
-            loss = self.training_step_for_one_model("b", self.model_b, batch_b, self.model_a)
+            loss = self.training_step_for_one_model("b", batch_b, self.model_b, self.model_a)
             self.log("loss/train_b",loss)
             
         return loss
 
 
-    def training_step_for_one_model(self,name, this_model, this_batch, other_model,):
-        b,c,h,w = this_batch.shape
+    def training_step_for_one_model(self,name, image_batch, model, other_model):
+        p = self.hparams
 
-        steps = 20
+        schedule = self.get_training_schedule_dict()
+        self.log_dict(schedule)
 
-        noise = torch.randn_like(this_batch)
+        noise = torch.randn_like(image_batch)
 
-        input_batch = self.randomly_interpolate_images(noise, this_batch)
+        noisy_image_batch = self.blend_image_batches(
+            image_batch, 
+            noise, 
+            schedule["starting_noise_ratio"],
+        )
 
-        other_fake_batch = self.iteratively_remove_error(other_model, input_batch, steps)
+        fake_batch = self.iteratively_remove_error(
+            other_model, 
+            noisy_image_batch, 
+            schedule["number_of_denoise_steps"],
+        )
 
-        error_prediction = this_model(input_batch)
-        target_batch = input_batch - this_batch
+        input_batch = self.randomly_blend_image_batches([noise, image_batch, fake_batch])
+
+        error_prediction = model(input_batch)
+        target_batch = input_batch - image_batch
         loss = self.mse_loss(error_prediction, target_batch)
 
-        self.log_batch_as_image_grid(f"other_fake_batch/{name}_to_other", other_fake_batch, first_batch_only=True)
+        self.log_batch_as_image_grid(f"fake_batch/{name}_to_other", fake_batch, first_batch_only=True)
         self.log_batch_as_image_grid(f"model_input/{name}", input_batch, first_batch_only=True)
         self.log_batch_as_image_grid(f"target_batch/{name}", target_batch, first_batch_only=True)
         self.log_batch_as_image_grid(f"error_prediction/{name}", error_prediction, first_batch_only=True)
 
         return loss
 
-    def get_max_error_removal_steps_from_shedule(self):
-        start_epoch = 0
-        end_epoch = 50
+    def get_training_schedule_dict(self):
 
-        start_steps = 2
-        end_steps = 20
+        step = self.global_step
 
-        epoch = self.current_epoch
+        schedule_dict = {
+            "starting_noise_ratio": self.linear_interpolation(
+                x=step,
+                x1=0, x2=10000,
+                y1=1.0, y2=0.0,
+            ),
+            "number_of_denoise_steps": int(self.linear_interpolation(
+                x=step,
+                x1=0, x2=10000,
+                y1=0, y2=20,
+            )),
 
-        steps = int((epoch-start_epoch) / (end_epoch-start_epoch) * (end_steps-start_steps) + start_steps)
+        }
 
-        self.log("noise_removal_steps_schedule",steps)
+        return schedule_dict
 
-        return steps
+
+    @staticmethod
+    def linear_interpolation(x,x1,x2,y1,y2):
+        
+        y = (x-x1) / (x2-x1) * (y2-y1) + y1
+
+        y_min = min(y1,y2)
+        y_max = max(y1,y2)
+
+        y = min(y_max,max(y_min,y))
+
+        return y
 
     def iteratively_remove_error(self,model, image, steps):
         
@@ -178,18 +206,29 @@ class LitTrainer(pl.LightningModule):
 
             return image
 
-    def randomly_interpolate_images(self, image1, image2):
-        b,c,h,w = image1.shape
+    def randomly_blend_image_batches(self, image_batch_list):
 
-        alpha_t = torch.rand(
-            size=(b,1,1,1),
-            device=self.device,
+        image_batch_stack = torch.stack(image_batch_list,dim=1)
+        b,n,c,h,w = image_batch_stack.shape
+        
+        dirichlet = torch.distributions.dirichlet.Dirichlet(
+            concentration=torch.ones(b,n,device=self.device),
         )
 
-        image = sqrt(alpha_t) * image1 + sqrt(1-alpha_t)*image2
+        variance = dirichlet.sample().reshape(b,n,1,1,1)
+
+        # sqrt ensures the variances stay the same
+        std = variance.sqrt()
+
+        image = (std * image_batch_stack).sum(1)
 
         return image
 
+    def blend_image_batches(self, image1, image2, blend_ratio):
+        # sqrt ensures the variances stay the same
+        image = math.sqrt(1-blend_ratio)*image1 + math.sqrt(blend_ratio) * image2 
+
+        return image
         
     def log_batch_as_image_grid(self,tag, batch, first_batch_only=False):
 
@@ -207,7 +246,7 @@ class LitTrainer(pl.LightningModule):
             image += 0.5
             image = image.clamp(0,1)
 
-            self.logger.experiment.add_image( tag, image, self.current_epoch)
+            self.logger.experiment.add_image( tag, image, self.global_step)
         
 
 if __name__ == "__main__":
