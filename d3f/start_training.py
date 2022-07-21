@@ -30,6 +30,7 @@ def start_training(hparams_dict):
     lit_trainer = LitTrainer(**hparams_dict)
     trainer = pl.Trainer(
         gpus=1,
+        log_every_n_steps=1,
         )
 
     trainer.fit(
@@ -122,7 +123,7 @@ class LitTrainer(pl.LightningModule):
     def training_step_for_one_model(self,name, this_model, this_batch, other_model,):
         b,c,h,w = this_batch.shape
 
-        steps = 10
+        steps = 20
 
         noise = torch.randn_like(this_batch)
 
@@ -192,20 +193,21 @@ class LitTrainer(pl.LightningModule):
         
     def log_batch_as_image_grid(self,tag, batch, first_batch_only=False):
 
-        if first_batch_only and self.current_batch > 0:
-            return
+        p = self.hparams
 
-        nrows = 3
-        ncols = 3
-        n = nrows*ncols
+        if self.global_step % p.log_images_every_n_steps == 0:
 
-        image = torchvision.utils.make_grid(batch[:n], nrows)
+            nrows = 3
+            ncols = 3
+            n = nrows*ncols
 
-        image *= 0.5
-        image += 0.5
-        image = image.clamp(0,1)
+            image = torchvision.utils.make_grid(batch[:n], nrows)
 
-        self.logger.experiment.add_image( tag, image, self.current_epoch)
+            image *= 0.5
+            image += 0.5
+            image = image.clamp(0,1)
+
+            self.logger.experiment.add_image( tag, image, self.current_epoch)
         
 
 if __name__ == "__main__":
