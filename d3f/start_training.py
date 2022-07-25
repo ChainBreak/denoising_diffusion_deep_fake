@@ -14,6 +14,11 @@ import torchvision.transforms as T
 import torchvision
 from d3f.dataset.image_dataset import ImageDataset
 
+TARGET_A = 0
+TARGET_B = 1
+TARGET_REAL = 0
+TARGET_FAKE = 1
+
 
 def main():
     parser = argparse.ArgumentParser()
@@ -44,12 +49,9 @@ class LitTrainer(pl.LightningModule):
         
         self.save_hyperparameters()
             
-        self.model_a = self.create_model_instance()
-        self.model_b = self.create_model_instance()
-
-        self.mse_loss = nn.MSELoss()
-
-        self.current_batch = 0
+        self.generator_a = self.create_generator_model_instance()
+        self.generator_b = self.create_generator_model_instance()
+        self.discriminator = self.create_discriminator_model_instance()
 
     def train_dataloader(self):
         p = self.hparams
@@ -80,7 +82,7 @@ class LitTrainer(pl.LightningModule):
         
         return dataloader
 
-    def create_model_instance(self):
+    def create_generator_model_instance(self):
         p = self.hparams
         encoder_name = p["encoder_name"]
 
@@ -93,64 +95,148 @@ class LitTrainer(pl.LightningModule):
         )
         return model
 
+    def create_discriminator_model_instance(self):
+
+        model = torchvision.models.resnet18(
+            num_classes=4,
+        )
+
+        return model
+
     def configure_optimizers(self):
         p = self.hparams
-        optimizer_a = torch.optim.Adam(self.model_a.parameters(), lr=p.learning_rate)
-        optimizer_b = torch.optim.Adam(self.model_b.parameters(), lr=p.learning_rate)
-        return [optimizer_a, optimizer_b]
+        optimizer_a = torch.optim.SGD(self.generator_a.parameters(), lr=p.generator_learning_rate)
+        optimizer_b = torch.optim.SGD(self.generator_b.parameters(), lr=p.generator_learning_rate)
+        optimizer_d = torch.optim.SGD(self.discriminator.parameters(), lr=p.discriminator_learning_rate)
+        return [optimizer_a, optimizer_b, optimizer_d]
 
     def training_step(self, batch, batch_idx, optimizer_idx):
         p = self.hparams
 
-        batch_a = batch["a"]
-        batch_b = batch["b"]
-
+        real_a = batch["a"]
+        real_b = batch["b"]
     
         if optimizer_idx == 0:
-            self.log_batch_as_image_grid("dataset/a", batch_a, first_batch_only=True)
-            loss = self.training_step_for_one_model("a", batch_a, self.model_a, self.model_b)
-            self.log("loss/train_a",loss)
+        
+            loss, image_b_to_a = self.generator_training_step(
+                name="a", 
+                starting_image=real_b, 
+                generator=self.generator_a,
+                target=self.create_target_tensor_like(real_b, TARGET_REAL, TARGET_A)
+                )
+            batch["b_to_a"] = image_b_to_a.detach()
+            return loss
             
         if optimizer_idx == 1:
-            self.log_batch_as_image_grid("dataset/b", batch_b, first_batch_only=True)
-            loss = self.training_step_for_one_model("b", batch_b, self.model_b, self.model_a)
-            self.log("loss/train_b",loss)
+            loss, image_a_to_b = self.generator_training_step(
+                name="b", 
+                starting_image=real_a, 
+                generator=self.generator_b,
+                target=self.create_target_tensor_like(real_a, TARGET_REAL, TARGET_B)
+                )
+            batch["a_to_b"] = image_a_to_b.detach()
+            return loss
+
+        if optimizer_idx == 2:
+
+            image = torch.concat([
+                batch["a"],
+                batch["b"],
+                batch["a_to_b"],
+                batch["b_to_a"],
+            ],dim=0) 
+
+            target = torch.concat([
+                self.create_target_tensor_like( batch["a"], TARGET_REAL, TARGET_A),
+                self.create_target_tensor_like( batch["b"], TARGET_REAL, TARGET_B),
+                self.create_target_tensor_like( batch["a_to_b"], TARGET_FAKE, TARGET_A),
+                self.create_target_tensor_like( batch["b_to_a"], TARGET_FAKE, TARGET_B),
+            ],dim=0)
+
+            prediction = self.discriminator( image )
             
-        return loss
+            loss_real_or_fake, loss_a_or_b = self.discriminator_loss( prediction, target)
+            loss = loss_real_or_fake + loss_a_or_b
 
+            self.log(f"loss_real_or_fake/discriminator", loss_real_or_fake)
+            self.log(f"loss_a_or_b/discriminator", loss_a_or_b)
+            self.log(f"loss/discriminator", loss)
 
-    def training_step_for_one_model(self,name, image_batch, model, other_model):
-        p = self.hparams
+            return loss
 
+            
+    def generator_training_step(self, name, starting_image, generator, target):
+ 
         schedule = self.get_training_schedule_dict()
-        self.log_dict(schedule)
 
-        noise = torch.randn_like(image_batch)
-
-        noisy_image_batch = self.blend_image_batches(
-            image_batch, 
-            noise, 
-            schedule["starting_noise_ratio"],
+        fake_image = self.iteratively_generate_fake_image_from_real(
+            start_image=starting_image,
+            generator=generator,
+            number_of_steps=schedule["number_of_generation_steps"],
         )
+        fake_image = generator( fake_image )
+        prediction = self.discriminator( fake_image )
 
-        fake_batch = self.iteratively_remove_error(
-            other_model, 
-            noisy_image_batch, 
-            schedule["number_of_denoise_steps"],
+        loss_real_or_fake, loss_a_or_b = self.discriminator_loss( prediction, target)
+        loss = loss_real_or_fake + loss_a_or_b
+
+        self.log(f"loss_real_or_fake/generator_{name}", loss_real_or_fake)
+        self.log(f"loss_a_or_b/generator_{name}", loss_a_or_b)
+        self.log(f"loss/generator_{name}", loss)
+        self.log_batch_as_image_grid(f"starting_image/generator_{name}", starting_image)
+        self.log_batch_as_image_grid(f"fake_image/generator_{name}", fake_image)
+
+        return loss, fake_image
+
+
+    def iteratively_generate_fake_image_from_real(self, start_image, generator, number_of_steps):
+        a = 0.05
+                
+        with torch.no_grad():
+
+            fake_image = start_image
+
+            for step_i in range(number_of_steps):
+
+                next_fake_image = generator(fake_image)
+
+                fake_image = math.sqrt(1-a) * fake_image + math.sqrt(a) * next_fake_image
+
+            return fake_image
+
+
+    def discriminator_loss(self, input_tensor , target_tensor ):
+    
+        real_or_fake_tensor = input_tensor[:,:2]
+        a_or_b_tensor = input_tensor[:,2:]
+
+        real_or_fake_target = target_tensor[:,0]
+        a_or_b_target = target_tensor[:,1]
+
+        loss_real_or_fake = F.cross_entropy(real_or_fake_tensor, real_or_fake_target, ignore_index=-1)
+        loss_a_or_b = F.cross_entropy(a_or_b_tensor, a_or_b_target, ignore_index=-1)
+
+        return loss_real_or_fake, loss_a_or_b
+
+
+    def create_target_tensor_like(self,batch, real_or_fake, a_or_b):
+        b,c,h,w = batch.shape
+        device = batch.device
+
+        if real_or_fake is None:
+            real_or_fake = -1
+
+        if a_or_b is None:
+            a_or_b = -1
+
+        target_tensor = torch.tensor(
+            [[real_or_fake, a_or_b]],
+            device=device,
         )
+        target_tensor = target_tensor.reshape(1,2).repeat(b,1)
 
-        input_batch = self.randomly_blend_image_batches([noise, image_batch, fake_batch])
+        return target_tensor # [b,2]
 
-        error_prediction = model(input_batch)
-        target_batch = input_batch - image_batch
-        loss = self.mse_loss(error_prediction, target_batch)
-
-        self.log_batch_as_image_grid(f"fake_batch/{name}_to_other", fake_batch, first_batch_only=True)
-        self.log_batch_as_image_grid(f"model_input/{name}", input_batch, first_batch_only=True)
-        self.log_batch_as_image_grid(f"target_batch/{name}", target_batch, first_batch_only=True)
-        self.log_batch_as_image_grid(f"error_prediction/{name}", error_prediction, first_batch_only=True)
-
-        return loss
 
     def get_training_schedule_dict(self):
 
@@ -162,16 +248,17 @@ class LitTrainer(pl.LightningModule):
                 x1=0, x2=10000,
                 y1=1.0, y2=0.0,
             ),
-            "number_of_denoise_steps": int(self.linear_interpolation(
+            "number_of_generation_steps": int(self.linear_interpolation(
                 x=step,
-                x1=0, x2=10000,
+                x1=0, x2=1000,
                 y1=0, y2=20,
             )),
 
         }
 
-        return schedule_dict
+        self.log_dict(schedule_dict)
 
+        return schedule_dict
 
     @staticmethod
     def linear_interpolation(x,x1,x2,y1,y2):
@@ -185,52 +272,8 @@ class LitTrainer(pl.LightningModule):
 
         return y
 
-    def iteratively_remove_error(self,model, image, steps):
-        
-        with torch.no_grad():
-            p = self.hparams
-
-            image = image.clone()
-
-            step_scale = p.error_step_scale
-
-            for i in range(steps):
-
-                error_prediction = model(image)
-
-                image -= error_prediction * step_scale
-
-                image = image.clamp(-1,1)
-
-                # self.log_batch_as_image_grid(f"removal/{i}_to_other", image, first_batch_only=True)
-
-            return image
-
-    def randomly_blend_image_batches(self, image_batch_list):
-
-        image_batch_stack = torch.stack(image_batch_list,dim=1)
-        b,n,c,h,w = image_batch_stack.shape
-        
-        dirichlet = torch.distributions.dirichlet.Dirichlet(
-            concentration=torch.ones(b,n,device=self.device),
-        )
-
-        variance = dirichlet.sample().reshape(b,n,1,1,1)
-
-        # sqrt ensures the variances stay the same
-        std = variance.sqrt()
-
-        image = (std * image_batch_stack).sum(1)
-
-        return image
-
-    def blend_image_batches(self, image1, image2, blend_ratio):
-        # sqrt ensures the variances stay the same
-        image = math.sqrt(1-blend_ratio)*image1 + math.sqrt(blend_ratio) * image2 
-
-        return image
-        
-    def log_batch_as_image_grid(self,tag, batch, first_batch_only=False):
+      
+    def log_batch_as_image_grid(self,tag, batch):
 
         p = self.hparams
 
@@ -251,16 +294,3 @@ class LitTrainer(pl.LightningModule):
 
 if __name__ == "__main__":
     main()
-
-
-# batch_a = dataloader_a.next()
-# batch_a_to_b = model_b.denoise(batch_a)
-# batch_a, batch_a_noise = add_noise(t, batch_a, batch_a_to_b)
-# batch_a_pred = model_a(batch_a)
-# loss_a = mse(batch_a_pred, batch_a_noise)
-
-# batch_b = dataloader_b.next()
-# batch_b_to_a = model_a.denoise(batch_b)
-# batch_b, batch_b_noise = add_noise(t, batch_b, batch_b_to_a)
-# batch_b_pred = model_b(batch_b)
-# loss_b = mse(batch_b_pred, batch_b_noise)
