@@ -105,8 +105,8 @@ class LitTrainer(pl.LightningModule):
 
     def configure_optimizers(self):
         p = self.hparams
-        optimizer_a = torch.optim.SGD(self.generator_a.parameters(), lr=p.generator_learning_rate)
-        optimizer_b = torch.optim.SGD(self.generator_b.parameters(), lr=p.generator_learning_rate)
+        optimizer_a = torch.optim.Adam(self.generator_a.parameters(), lr=p.generator_learning_rate)
+        optimizer_b = torch.optim.Adam(self.generator_b.parameters(), lr=p.generator_learning_rate)
         optimizer_d = torch.optim.SGD(self.discriminator.parameters(), lr=p.discriminator_learning_rate)
         return [optimizer_a, optimizer_b, optimizer_d]
 
@@ -163,7 +163,6 @@ class LitTrainer(pl.LightningModule):
             self.log(f"loss/discriminator", loss)
 
             return loss
-
             
     def generator_training_step(self, name, starting_image, generator, target):
  
@@ -172,16 +171,24 @@ class LitTrainer(pl.LightningModule):
         fake_image = self.iteratively_generate_fake_image_from_real(
             start_image=starting_image,
             generator=generator,
-            number_of_steps=schedule["number_of_generation_steps"],
+            number_of_steps= int(schedule["number_of_generation_steps"]),
         )
         fake_image = generator( fake_image )
         prediction = self.discriminator( fake_image )
 
         loss_real_or_fake, loss_a_or_b = self.discriminator_loss( prediction, target)
-        loss = loss_real_or_fake + loss_a_or_b
+
+        generator_loss = loss_real_or_fake + loss_a_or_b
+
+        mse_loss = F.mse_loss(fake_image,starting_image)
+
+        r = schedule["mse_loss_ratio"]
+        loss = r*mse_loss + (1-r)*generator_loss
 
         self.log(f"loss_real_or_fake/generator_{name}", loss_real_or_fake)
         self.log(f"loss_a_or_b/generator_{name}", loss_a_or_b)
+        self.log(f"loss/generator_{name}", generator_loss)
+        self.log(f"loss_mse/generator_{name}", mse_loss)
         self.log(f"loss/generator_{name}", loss)
         self.log_batch_as_image_grid(f"starting_image/generator_{name}", starting_image)
         self.log_batch_as_image_grid(f"fake_image/generator_{name}", fake_image)
@@ -243,16 +250,18 @@ class LitTrainer(pl.LightningModule):
         step = self.global_step
 
         schedule_dict = {
-            "starting_noise_ratio": self.linear_interpolation(
+            "number_of_generation_steps": self.linear_interpolation(
                 x=step,
                 x1=0, x2=10000,
+                y1=1, y2=20,
+            ),
+
+            "mse_loss_ratio": self.linear_interpolation(
+                x=step,
+                x1=0, x2=5000,
                 y1=1.0, y2=0.0,
             ),
-            "number_of_generation_steps": int(self.linear_interpolation(
-                x=step,
-                x1=0, x2=1000,
-                y1=0, y2=20,
-            )),
+
 
         }
 
