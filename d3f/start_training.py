@@ -91,7 +91,7 @@ class LitTrainer(pl.LightningModule):
             encoder_weights=None,
             in_channels=3,
             classes=3,
-            activation=None,
+            activation="tanh",
         )
         return model
 
@@ -105,52 +105,58 @@ class LitTrainer(pl.LightningModule):
 
     def configure_optimizers(self):
         p = self.hparams
-        optimizer_a = torch.optim.Adam(self.generator_a.parameters(), lr=p.generator_learning_rate)
-        optimizer_b = torch.optim.Adam(self.generator_b.parameters(), lr=p.generator_learning_rate)
-        optimizer_d = torch.optim.SGD(self.discriminator.parameters(), lr=p.discriminator_learning_rate)
-        return [optimizer_a, optimizer_b, optimizer_d]
+        b1 = p.adam_b1
+        b2 = p.adam_b2
+        optimizer_a = torch.optim.Adam(self.generator_a.parameters(), lr=p.generator_learning_rate, betas=(b1,b2))
+        optimizer_b = torch.optim.Adam(self.generator_b.parameters(), lr=p.generator_learning_rate, betas=(b1,b2))
+        optimizer_d = torch.optim.Adam(self.discriminator.parameters(), lr=p.discriminator_learning_rate, betas=(b1,b2))
+
+        return (
+            {'optimizer': optimizer_a, 'frequency': 1},
+            {'optimizer': optimizer_b, 'frequency': 1},
+            {'optimizer': optimizer_d, 'frequency': p.discriminator_optimiser_frequency},
+        )
 
     def training_step(self, batch, batch_idx, optimizer_idx):
         p = self.hparams
 
-        real_a = batch["a"]
-        real_b = batch["b"]
-    
+        self.real_a = batch["a"]
+        self.real_b = batch["b"]
+
         if optimizer_idx == 0:
-        
             loss, image_b_to_a = self.generator_training_step(
                 name="a", 
-                starting_image=real_b, 
+                starting_image=self.real_b, 
                 generator=self.generator_a,
-                target=self.create_target_tensor_like(real_b, TARGET_REAL, TARGET_A)
+                target=self.create_target_tensor_like(self.real_b, TARGET_REAL, TARGET_A)
                 )
-            batch["b_to_a"] = image_b_to_a.detach()
+            self.b_to_a = image_b_to_a.detach()
             return loss
             
         if optimizer_idx == 1:
             loss, image_a_to_b = self.generator_training_step(
                 name="b", 
-                starting_image=real_a, 
+                starting_image=self.real_a, 
                 generator=self.generator_b,
-                target=self.create_target_tensor_like(real_a, TARGET_REAL, TARGET_B)
+                target=self.create_target_tensor_like(self.real_a, TARGET_REAL, TARGET_B)
                 )
-            batch["a_to_b"] = image_a_to_b.detach()
+            self.a_to_b = image_a_to_b.detach()
             return loss
 
         if optimizer_idx == 2:
 
             image = torch.concat([
-                batch["a"],
-                batch["b"],
-                batch["a_to_b"],
-                batch["b_to_a"],
+                self.real_a,
+                self.real_b,
+                self.a_to_b,
+                self.b_to_a,
             ],dim=0) 
 
             target = torch.concat([
-                self.create_target_tensor_like( batch["a"], TARGET_REAL, TARGET_A),
-                self.create_target_tensor_like( batch["b"], TARGET_REAL, TARGET_B),
-                self.create_target_tensor_like( batch["a_to_b"], TARGET_FAKE, TARGET_A),
-                self.create_target_tensor_like( batch["b_to_a"], TARGET_FAKE, TARGET_B),
+                self.create_target_tensor_like(self.real_a , TARGET_REAL, TARGET_A),
+                self.create_target_tensor_like(self.real_b , TARGET_REAL, TARGET_B),
+                self.create_target_tensor_like(self.a_to_b , TARGET_FAKE, TARGET_A),
+                self.create_target_tensor_like(self.b_to_a , TARGET_FAKE, TARGET_B),
             ],dim=0)
 
             prediction = self.discriminator( image )
@@ -161,6 +167,8 @@ class LitTrainer(pl.LightningModule):
             self.log(f"loss_real_or_fake/discriminator", loss_real_or_fake)
             self.log(f"loss_a_or_b/discriminator", loss_a_or_b)
             self.log(f"loss/discriminator", loss)
+
+            self.clamp_discriminator_paramters()
 
             return loss
             
@@ -225,6 +233,11 @@ class LitTrainer(pl.LightningModule):
 
         return loss_real_or_fake, loss_a_or_b
 
+    def clamp_discriminator_paramters(self):
+        p = self.hparams
+        clip_value = p.discriminator_parameter_clamp_value
+        for p in self.discriminator.parameters():
+            p.data.clamp_(-clip_value, clip_value)
 
     def create_target_tensor_like(self,batch, real_or_fake, a_or_b):
         b,c,h,w = batch.shape
@@ -253,13 +266,13 @@ class LitTrainer(pl.LightningModule):
             "number_of_generation_steps": self.linear_interpolation(
                 x=step,
                 x1=0, x2=10000,
-                y1=1, y2=20,
+                y1=0, y2=0,
             ),
 
             "mse_loss_ratio": self.linear_interpolation(
                 x=step,
-                x1=0, x2=5000,
-                y1=1.0, y2=0.0,
+                x1=0, x2=1000,
+                y1=0.0, y2=0.0,
             ),
 
 
