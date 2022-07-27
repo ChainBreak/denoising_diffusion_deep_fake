@@ -15,7 +15,8 @@ import torchvision
 import albumentations as A
 from d3f.dataset.image_dataset import ImageDataset
 
-
+REAL_TARGET = -1
+FAKE_TARGET = 1
 
 def main():
     parser = argparse.ArgumentParser()
@@ -46,7 +47,7 @@ class LitTrainer(pl.LightningModule):
         
         self.save_hyperparameters()
             
-        self.model = self.create_model_instance()
+        self.discriminator = self.create_discriminator_model_instance()
 
     def train_dataloader(self):
         p = self.hparams
@@ -105,17 +106,14 @@ class LitTrainer(pl.LightningModule):
             A.HueSaturationValue(hue_shift_limit=255,p=1.0),
         ])
 
-    def create_model_instance(self):
+    def create_discriminator_model_instance(self):
         p = self.hparams
-
-        number_of_classes = 2
-        output_size = 2 + number_of_classes
 
         model = segmentation_models_pytorch.Unet(
             encoder_name=p.encoder_name,
             encoder_weights=None,
             in_channels=3,
-            classes=output_size,
+            classes=1,
             activation=None,
         )
 
@@ -123,137 +121,100 @@ class LitTrainer(pl.LightningModule):
 
     def configure_optimizers(self):
         p = self.hparams
-        optimizer = torch.optim.Adam(self.model.parameters(), lr=p.learning_rate)
+        optimizer = torch.optim.Adam(self.discriminator.parameters(), lr=p.learning_rate)
         return optimizer
 
     def training_step(self, batch, batch_idx):
 
         p = self.hparams
 
-        real_a = batch["a"]["raw_image"]
-        real_b = batch["b"]["raw_image"]
-        augm_a = batch["a"]["augmented_image"]
-        augm_b = batch["b"]["augmented_image"]
 
-        fake_a, fake_b = self.create_fakes_via_gradient_decent(real_a,real_b)
+        driver = batch["a"]["augmented_image"]
+        real = batch["b"]["augmented_image"]
 
-        augm_a_target = self.create_target_tensor_like(augm_a, is_fake=None, class_index=0)
-        augm_b_target = self.create_target_tensor_like(augm_b, is_fake=None, class_index=1)
-        real_a_target = self.create_target_tensor_like(real_a, is_fake=False, class_index=None)
-        real_b_target = self.create_target_tensor_like(real_b, is_fake=False, class_index=None)
-        fake_a_target = self.create_target_tensor_like(fake_a, is_fake=True , class_index=None)
-        fake_b_target = self.create_target_tensor_like(fake_b, is_fake=True , class_index=None)
+        fake = self.create_fakes_via_gradient_decent(driver)
 
-        self.log_batch_as_image_grid(f"real/a", real_a)
-        self.log_batch_as_image_grid(f"real/b", real_b)
-        self.log_batch_as_image_grid(f"augm/a", augm_a)
-        self.log_batch_as_image_grid(f"augm/b", augm_b)
-        self.log_batch_as_image_grid(f"fake/a", fake_a)
-        self.log_batch_as_image_grid(f"fake/b", fake_b)
+        self.log_batch_as_image_grid(f"images/driver", driver)
+        self.log_batch_as_image_grid(f"images/real", real)
+        self.log_batch_as_image_grid(f"images/fake", fake)
         
 
-        input_tensor = torch.concat(
-            (augm_a, augm_b, real_a, real_b, fake_a, fake_b),
-            dim=0,
-        )
+        real_target = self.create_target_tensor_like(real, REAL_TARGET)
+        fake_target = self.create_target_tensor_like(fake, FAKE_TARGET)
 
-        target_tensor = torch.concat(
-            (augm_a_target, augm_b_target, real_a_target, real_b_target, fake_a_target, fake_b_target),
-            dim=0,
-        )
+        input_tensor = torch.concat([real, fake],dim=0)
+        target_tensor = torch.concat([real_target, fake_target],dim=0)
 
-        output_tensor = self.model(input_tensor)
+        output_tensor = self.discriminator(input_tensor)
 
-        loss_is_fake, loss_class = self.descriminator_loss(output_tensor,target_tensor)
+        loss = self.descriminator_loss(output_tensor,target_tensor)
 
-        self.log("loss_is_fake",loss_is_fake)
-        self.log("loss_class",loss_class)
-        
-        return loss_is_fake + loss_class
+        self.log("loss",loss)
 
-    def create_fakes_via_gradient_decent(self,real_a,real_b):
+        self.clamp_discriminator_paramters()
+            
+        return loss
+
+    def create_fakes_via_gradient_decent(self,driver):
         p = self.hparams
 
-        batch_size_a = real_a.shape[0]
-        batch_size_b = real_b.shape[0]
+        fake = driver.clone()
 
         # Targets are a real images with the other items class
-        target_a = self.create_target_tensor_like(real_a, is_fake=False, class_index=1)
-        target_b = self.create_target_tensor_like(real_b, is_fake=False, class_index=0)
+        target = self.create_target_tensor_like(driver, REAL_TARGET)
 
-        input_tensor = torch.concat(
-            (real_a, real_b),
-            dim=0,
-        )
+        fake.requires_grad_()
+        
+        number_of_steps = self.global_step//100 + 1
 
-        target_tensor = torch.concat(
-            (target_a, target_b),
-            dim=0,
-        )
+        for i in range(random.randint(1,number_of_steps)):
 
-        input_tensor.requires_grad_()
-        print()
-        for i in range(p.number_of_fake_generation_steps):
+            model_output = self.discriminator(fake)
 
-            model_output = self.model(input_tensor)
+            loss= self.descriminator_loss(model_output, target)
 
-            loss_is_fake, loss_class = self.descriminator_loss(model_output, target_tensor)
-
-
-            loss = loss_is_fake + loss_class
             loss.backward()
 
-            grad_abs = input_tensor.grad.abs()
+            grad_abs = fake.grad.abs()
             grad_mean = grad_abs.mean()
             grad_max = grad_abs.max()
             grad_min = grad_abs.min()
 
-            print(f"fake={loss_is_fake.item():8f} class={loss_class.item():8f} grad_min={grad_min.item():8f} grad_mean={grad_mean.item():8f}  grad_max={grad_max.item():8f}")
+            print(f"loss={loss.item():8f}  grad_min={grad_min.item():8f} grad_mean={grad_mean.item():8f}  grad_max={grad_max.item():8f}")
           
 
             with torch.no_grad():
-                input_tensor -= p.fake_generation_step_size * input_tensor.grad
+                fake -= p.fake_generation_step_size * fake.grad
             
-            input_tensor.grad.zero_()
+            fake.grad.zero_()
 
-        self.model.zero_grad()
+        self.discriminator.zero_grad()
 
+        return fake
 
-        fake_b = input_tensor.detach()[:batch_size_a ]
-        fake_a = input_tensor.detach()[ batch_size_a:]
-
-        return fake_a, fake_b
-
-    def create_target_tensor_like(self,batch, is_fake, class_index):
+    def create_target_tensor_like(self,batch, real_or_fake):
         b,c,h,w = batch.shape
         device = batch.device
 
-        if is_fake is None:
-            is_fake = -1
-
-        if class_index is None:
-            class_index = -1
-
         target_tensor = torch.tensor(
-            [[is_fake ,class_index]],
+            [real_or_fake],
             device=device,
         )
-        target_tensor = target_tensor.reshape(1,2,1,1).repeat(b,1,h,w)
+        target_tensor = target_tensor.reshape(1,1,1,1).repeat(b,1,h,w)
 
-        return target_tensor # [b,2,h,w]
+        return target_tensor # [b,1,h,w]
 
     def descriminator_loss(self, input_tensor , label_tensor ):
     
-        is_fake_tensor = input_tensor[:,:2,:,:]
-        class_tensor = input_tensor[:,2:,:,:]
+        loss = input_tensor * label_tensor
 
-        is_fake_labels = label_tensor[:,0,:,:]
-        class_labels = label_tensor[:,1,:,:]
+        return loss.mean()
 
-        loss_is_fake = F.cross_entropy(is_fake_tensor, is_fake_labels, ignore_index=-1)
-        loss_class = F.cross_entropy(class_tensor, class_labels, ignore_index=-1)
-
-        return loss_is_fake, loss_class
+    def clamp_discriminator_paramters(self):
+        p = self.hparams
+        clip_value = p.discriminator_parameter_clamp_value
+        for p in self.discriminator.parameters():
+            p.data.clamp_(-clip_value, clip_value)
         
     def log_batch_as_image_grid(self,tag, batch):
 
