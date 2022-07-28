@@ -1,11 +1,15 @@
 batch_size: 32
 learning_rate: 0.001
+weight_decay: 0.0001
+adam_b1: 0.5
+adam_b2: 0.999
+
 num_workers: 8
 encoder_name: "resnet18"
-discriminator_parameter_clamp_value: 0.01
+discriminator_parameter_clamp_value: 0.1
 
 number_of_fake_generation_steps: 20
-fake_generation_step_size: 100.0
+fake_generation_step_size: 1000.0
 
 data_path_a: "/home/thomas/datasets/denoising_diffusion_deep_fake/tom_w128_h128"
 mean_a: [0.5,0.5,0.5]

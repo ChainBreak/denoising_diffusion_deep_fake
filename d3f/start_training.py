@@ -15,8 +15,8 @@ import torchvision
 import albumentations as A
 from d3f.dataset.image_dataset import ImageDataset
 
-REAL_TARGET = -1
-FAKE_TARGET = 1
+REAL_SIGN = -1
+FAKE_SIGN = 1
 
 def main():
     parser = argparse.ArgumentParser()
@@ -109,49 +109,45 @@ class LitTrainer(pl.LightningModule):
     def create_discriminator_model_instance(self):
         p = self.hparams
 
-        model = segmentation_models_pytorch.Unet(
-            encoder_name=p.encoder_name,
-            encoder_weights=None,
-            in_channels=3,
-            classes=1,
-            activation=None,
+    
+        model = torchvision.models.resnet18(
+            num_classes=1,  
         )
+
 
         return model
 
     def configure_optimizers(self):
         p = self.hparams
-        optimizer = torch.optim.Adam(self.discriminator.parameters(), lr=p.learning_rate)
+        lr = p.learning_rate
+        b1 = p.adam_b1
+        b2 = p.adam_b2
+        optimizer = torch.optim.Adam(self.discriminator.parameters(), lr=lr,weight_decay=p.weight_decay)
         return optimizer
 
     def training_step(self, batch, batch_idx):
 
-        p = self.hparams
-
+        # self.clamp_discriminator_paramters()
 
         driver = batch["a"]["augmented_image"]
         real = batch["b"]["augmented_image"]
 
         fake = self.create_fakes_via_gradient_decent(driver)
 
+        real_loss  = REAL_SIGN * self.discriminator(real).mean()
+        fake_loss  = FAKE_SIGN * self.discriminator(fake).mean()
+
+        loss = real_loss + fake_loss
+
+
+        self.log("loss/loss",loss)
+        self.log("loss/real",real_loss)
+        self.log("loss/fake",fake_loss)
+
         self.log_batch_as_image_grid(f"images/driver", driver)
         self.log_batch_as_image_grid(f"images/real", real)
         self.log_batch_as_image_grid(f"images/fake", fake)
-        
 
-        real_target = self.create_target_tensor_like(real, REAL_TARGET)
-        fake_target = self.create_target_tensor_like(fake, FAKE_TARGET)
-
-        input_tensor = torch.concat([real, fake],dim=0)
-        target_tensor = torch.concat([real_target, fake_target],dim=0)
-
-        output_tensor = self.discriminator(input_tensor)
-
-        loss = self.descriminator_loss(output_tensor,target_tensor)
-
-        self.log("loss",loss)
-
-        self.clamp_discriminator_paramters()
             
         return loss
 
@@ -161,17 +157,18 @@ class LitTrainer(pl.LightningModule):
         fake = driver.clone()
 
         # Targets are a real images with the other items class
-        target = self.create_target_tensor_like(driver, REAL_TARGET)
+        target = self.create_target_tensor_like(driver, REAL_SIGN)
 
         fake.requires_grad_()
         
-        number_of_steps = self.global_step//100 + 1
+        number_of_steps = 1#self.global_step//100 + 1
 
         for i in range(random.randint(1,number_of_steps)):
 
-            model_output = self.discriminator(fake)
+            
+            
 
-            loss= self.descriminator_loss(model_output, target)
+            loss = REAL_SIGN*self.discriminator(fake).mean()
 
             loss.backward()
 
@@ -186,9 +183,15 @@ class LitTrainer(pl.LightningModule):
             with torch.no_grad():
                 fake -= p.fake_generation_step_size * fake.grad
             
-            fake.grad.zero_()
+            if i == 0:
+                self.log_batch_as_image_grid(f"images/fake_grad", fake.grad / grad_mean)
 
+            fake.grad.zero_()
+            
         self.discriminator.zero_grad()
+
+        self.log("loss_generator",loss)
+
 
         return fake
 
@@ -218,7 +221,7 @@ class LitTrainer(pl.LightningModule):
         
     def log_batch_as_image_grid(self,tag, batch):
 
-        if self.global_step % 10 == 0:
+        if self.global_step % 100 == 0:
             nrows = 3
             ncols = 3
             n = nrows*ncols
