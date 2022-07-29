@@ -107,48 +107,35 @@ class LitTrainer(pl.LightningModule):
 
     
         if optimizer_idx == 0:
-            self.log_batch_as_image_grid("dataset/a", batch_a, first_batch_only=True)
             loss = self.training_step_for_one_model("a", batch_a, self.model_a, self.model_b)
             self.log("loss/train_a",loss)
             
         if optimizer_idx == 1:
-            self.log_batch_as_image_grid("dataset/b", batch_b, first_batch_only=True)
             loss = self.training_step_for_one_model("b", batch_b, self.model_b, self.model_a)
             self.log("loss/train_b",loss)
             
         return loss
 
 
-    def training_step_for_one_model(self,name, image_batch, model, other_model):
+    def training_step_for_one_model(self,name, real, real_model, fake_model):
         p = self.hparams
 
-        schedule = self.get_training_schedule_dict()
-        self.log_dict(schedule)
-
-        noise = torch.randn_like(image_batch)
-
-        noisy_image_batch = self.blend_image_batches(
-            image_batch, 
-            noise, 
-            schedule["starting_noise_ratio"],
+        fake = self.iteratively_step_towards_domain(
+            fake_model, 
+            real, 
+            p.number_of_denoise_steps,
         )
 
-        fake_batch = self.iteratively_remove_error(
-            other_model, 
-            noisy_image_batch, 
-            schedule["number_of_denoise_steps"],
-        )
+        input_batch = self.randomly_blend_image_batches([real, fake])
 
-        input_batch = self.randomly_blend_image_batches([noise, image_batch, fake_batch])
+        real_prediction = real_model(input_batch)
 
-        error_prediction = model(input_batch)
-        target_batch = input_batch - image_batch
-        loss = self.mse_loss(error_prediction, target_batch)
+        loss = self.mse_loss(real_prediction, real)
 
-        self.log_batch_as_image_grid(f"fake_batch/{name}_to_other", fake_batch, first_batch_only=True)
-        self.log_batch_as_image_grid(f"model_input/{name}", input_batch, first_batch_only=True)
-        self.log_batch_as_image_grid(f"target_batch/{name}", target_batch, first_batch_only=True)
-        self.log_batch_as_image_grid(f"error_prediction/{name}", error_prediction, first_batch_only=True)
+        self.log_batch_as_image_grid(f"fake/{name}_to_fake", fake)
+        self.log_batch_as_image_grid(f"model_input/{name}", input_batch)
+        self.log_batch_as_image_grid(f"real_target/{name}", real)
+        self.log_batch_as_image_grid(f"real_prediction/{name}", real_prediction)
 
         return loss
 
@@ -185,24 +172,16 @@ class LitTrainer(pl.LightningModule):
 
         return y
 
-    def iteratively_remove_error(self,model, image, steps):
+    def iteratively_step_towards_domain(self,model, start_image, steps):
+        p = self.hparams
         
         with torch.no_grad():
-            p = self.hparams
 
-            image = image.clone()
+            image = start_image.clone()
 
-            step_scale = p.error_step_scale
+            for a in torch.linspace(1,0,steps):
 
-            for i in range(steps):
-
-                error_prediction = model(image)
-
-                image -= error_prediction * step_scale
-
-                image = image.clamp(-1,1)
-
-                # self.log_batch_as_image_grid(f"removal/{i}_to_other", image, first_batch_only=True)
+                image = math.sqrt(1-a)*model(image) + math.sqrt(a)*start_image
 
             return image
 
