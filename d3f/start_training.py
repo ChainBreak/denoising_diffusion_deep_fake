@@ -103,7 +103,7 @@ class LitTrainer(pl.LightningModule):
 
                 A.RandomBrightnessContrast(),            
             ], p=0.3),
-            A.HueSaturationValue(hue_shift_limit=255,p=1.0),
+            # A.HueSaturationValue(hue_shift_limit=255,p=1.0),
         ])
 
     def create_discriminator_model_instance(self):
@@ -161,16 +161,36 @@ class LitTrainer(pl.LightningModule):
 
         fake.requires_grad_()
         
-        number_of_steps = 1#self.global_step//100 + 1
+        number_of_steps = self.global_step//100 + 1
+
+        transform = torchvision.transforms.RandomAffine(
+            degrees=20,
+            translate=(0.1,0.1),
+            scale=(0.95,1.3),
+            )
+
+        number_of_transforms = 10
+
+        instance_norm = nn.InstanceNorm2d(num_features=3)
 
         for i in range(random.randint(1,number_of_steps)):
 
-            
-            
+            fake_transforms = [transform(fake) for i in range(number_of_transforms)]
 
-            loss = REAL_SIGN*self.discriminator(fake).mean()
+            fake_transforms = fake_transforms
+
+            loss = 0
+
+            for j,fake_transform in enumerate(fake_transforms):
+                loss += REAL_SIGN*self.discriminator(fake_transform).mean()
+                # if i == 0:
+                #     self.log_batch_as_image_grid(f"fake_transform/{j}", fake_transform)
 
             loss.backward()
+
+            with torch.no_grad():
+                normed_grad = instance_norm(fake.grad)
+                fake -= p.fake_generation_step_size * normed_grad
 
             grad_abs = fake.grad.abs()
             grad_mean = grad_abs.mean()
@@ -180,11 +200,10 @@ class LitTrainer(pl.LightningModule):
             print(f"loss={loss.item():8f}  grad_min={grad_min.item():8f} grad_mean={grad_mean.item():8f}  grad_max={grad_max.item():8f}")
           
 
-            with torch.no_grad():
-                fake -= p.fake_generation_step_size * fake.grad
+            
             
             if i == 0:
-                self.log_batch_as_image_grid(f"images/fake_grad", fake.grad / grad_mean)
+                self.log_batch_as_image_grid(f"images/fake_grad", normed_grad)
 
             fake.grad.zero_()
             
