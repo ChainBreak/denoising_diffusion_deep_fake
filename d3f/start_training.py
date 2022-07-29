@@ -126,7 +126,8 @@ class LitTrainer(pl.LightningModule):
             p.number_of_denoise_steps,
         )
 
-        input_batch = self.randomly_blend_image_batches([real, fake])
+        # input_batch = self.randomly_blend_image_batches([real, fake])
+        input_batch = fake
 
         real_prediction = real_model(input_batch)
 
@@ -176,12 +177,12 @@ class LitTrainer(pl.LightningModule):
         p = self.hparams
         
         with torch.no_grad():
+            image = model(start_image)
+            # image = start_image.clone()
 
-            image = start_image.clone()
+            # for a in torch.linspace(1,0,steps):
 
-            for a in torch.linspace(1,0,steps):
-
-                image = math.sqrt(1-a)*model(image) + math.sqrt(a)*start_image
+            #     image = math.sqrt(1-a)*model(image) + math.sqrt(a)*start_image
 
             return image
 
