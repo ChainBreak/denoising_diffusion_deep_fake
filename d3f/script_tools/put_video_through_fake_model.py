@@ -4,6 +4,7 @@ from tqdm import tqdm
 import argparse
 from pathlib import Path
 from d3f.lit_module import LitModule
+from d3f.script_tools.video_writer_context_manager import VideoWriter
 
 def main():
 
@@ -51,15 +52,17 @@ class RenderFakeVideo():
 
     def render_real_fake_video(self):
         
-        for real_frame in tqdm(self.open_video_as_generator()):
-            
-            real_frame,fake_frame = self.convert_real_frame_to_fake(real_frame)
+        with VideoWriter("test.mp4",256,128,30) as video_writer:
+            for real_frame in tqdm(self.open_video_as_generator()):
+                
+                real_frame,fake_frame = self.convert_real_frame_to_fake(real_frame)
 
-            real_and_fake = np.concatenate([real_frame,fake_frame],axis=1)
+                real_and_fake = np.concatenate([real_frame,fake_frame],axis=1)
 
-            cv2.imshow("real_and_fake",real_and_fake)
+                video_writer.write(real_and_fake)
+                cv2.imshow("real_and_fake",real_and_fake)
 
-            cv2.waitKey(1)
+                cv2.waitKey(1)
             
     def open_video_as_generator(self):
 
