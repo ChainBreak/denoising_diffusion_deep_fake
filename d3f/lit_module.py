@@ -1,3 +1,5 @@
+import cv2
+import numpy as np
 import math
 import argparse
 import pytorch_lightning as pl
@@ -5,6 +7,7 @@ import segmentation_models_pytorch
 import torch
 import torch.nn as nn
 import torchvision.transforms as T
+import torchvision.transforms.functional as TF
 import torchvision
 from torch.utils.data import DataLoader
 from d3f.dataset.image_dataset import ImageDataset
@@ -117,4 +120,57 @@ class LitModule(pl.LightningModule):
             image = image.clamp(0,1)
 
             self.logger.experiment.add_image( tag, image, self.global_step)
+
+    def predict_fake(self,real_bgr,model_a_or_b):
+        p = self.hparams
+        if model_a_or_b == "a":
+            return self.predict_fake_for_single_frame(real_bgr, self.model_a, p.mean_b, p.std_b)
+
+        if model_a_or_b == "b":
+            return self.predict_fake_for_single_frame(real_bgr, self.model_b, p.mean_a, p.std_a)
+
+
+
+    def predict_fake_for_single_frame(self, real_bgr, model, mean ,std ):
+
+        mean = torch.tensor(mean,device=self.device)
+        std = torch.tensor(std,device=self.device)
+
+        input_tensor = self.cv2_to_tensor_normalised(real_bgr, mean, std)
+
+        output_tensor = model(input_tensor)
+
+        fake_bgr = self.tensor_cv2_to_denormalised(output_tensor, mean, std)
+
+        return fake_bgr
+
+    def cv2_to_tensor_normalised(self,image_bgr,mean,std):
+
+        image_rgb = cv2.cvtColor(image_bgr, cv2.COLOR_BGR2RGB)
+  
+        tensor = torch.from_numpy(image_rgb).float().to(self.device)
+ 
+        tensor = tensor.permute(2,0,1) # hwc to chw
+
+        tensor -= mean.reshape(3,1,1)
+        tensor /= std.reshape(3,1,1)
+
+        return tensor.unsqueeze(0)
+
+    def tensor_cv2_to_denormalised(self,tensor,mean,std):
+        tensor = tensor.squeeze(0)
+
+        tensor *= std.reshape(3,1,1)
+        tensor += mean.reshape(3,1,1)
+
+        tensor = tensor.permute(1,2,0) # chw to hwc
+
+        tensor = tensor.int()
+        tensor = tensor.clamp(0,255)
+
+        image_rgb = tensor.cpu().numpy().astype(np.uint8)
+
+        image_bgr = cv2.cvtColor(image_rgb, cv2.COLOR_RGB2BGR)
+
+        return image_bgr
         
