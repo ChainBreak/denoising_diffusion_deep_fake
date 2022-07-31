@@ -11,6 +11,8 @@ import torchvision.transforms.functional as TF
 import torchvision
 from torch.utils.data import DataLoader
 from d3f.dataset.image_dataset import ImageDataset
+import albumentations as A
+from albumentations.pytorch import ToTensorV2
 
 
 class LitModule(pl.LightningModule):
@@ -50,13 +52,11 @@ class LitModule(pl.LightningModule):
     def create_dataloader(self, path, mean, std):
         p = self.hparams
 
-        transform = nn.Sequential(
-            T.Normalize(mean,std),
-        )
+        transform = self.create_augmentation_pipeline(mean,std)
 
         dataset = ImageDataset(
             path,
-            transform=transform,
+            albumentations_transform=transform,
             )
 
         dataloader = DataLoader(
@@ -68,6 +68,37 @@ class LitModule(pl.LightningModule):
         
         return dataloader
 
+    def create_augmentation_pipeline(self,mean,std):
+         return A.Compose([
+            # A.RandomRotate90(),
+            # A.Flip(),
+            # A.Transpose(),
+            A.OneOf([
+                # A.IAAAdditiveGaussianNoise(),
+                A.GaussNoise(),
+            ], p=0.2),
+            A.OneOf([
+                A.MotionBlur(p=.2),
+                A.MedianBlur(blur_limit=3, p=0.1),
+                A.Blur(blur_limit=3, p=0.1),
+            ], p=0.2),
+            A.ShiftScaleRotate(shift_limit=0.0, scale_limit=0.2, rotate_limit=10, p=0.2),
+            A.OneOf([
+                A.OpticalDistortion(p=0.3),
+                A.GridDistortion(p=.1),
+                # A.IAAPiecewiseAffine(p=0.3),
+            ], p=0.2),
+            A.OneOf([
+                A.CLAHE(clip_limit=2),
+
+                A.RandomBrightnessContrast(),            
+            ], p=0.3),
+            A.HueSaturationValue(hue_shift_limit=60,p=0.1),
+            A.Normalize(mean,std,max_pixel_value=1.0),
+            ToTensorV2(),
+        ])
+
+
     def configure_optimizers(self):
         p = self.hparams
         optimizer_a = torch.optim.Adam(self.model_a.parameters(), lr=p.learning_rate)
@@ -76,8 +107,8 @@ class LitModule(pl.LightningModule):
 
     def training_step(self, batch, batch_idx, optimizer_idx):
         
-        batch_a = batch["a"]
-        batch_b = batch["b"]
+        batch_a = batch["a"]["image"]
+        batch_b = batch["b"]["image"]
 
         if optimizer_idx == 0:
             loss = self.training_step_for_one_model("a", batch_a, self.model_a, self.model_b)
@@ -128,8 +159,6 @@ class LitModule(pl.LightningModule):
 
         if model_a_or_b == "b":
             return self.predict_fake_for_single_frame(real_bgr, self.model_b, p.mean_a, p.std_a)
-
-
 
     def predict_fake_for_single_frame(self, real_bgr, model, mean ,std ):
 
