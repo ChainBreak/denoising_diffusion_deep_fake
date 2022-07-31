@@ -1,4 +1,5 @@
 import cv2
+import datetime
 import numpy as np
 from tqdm import tqdm
 import argparse
@@ -51,8 +52,15 @@ class RenderFakeVideo():
         return model
 
     def render_real_fake_video(self):
+
+        fps = self.get_input_video_properties()
+
+        output_path = str(self.get_output_video_path())
+
+        w = 2*self.image_width
+        h = self.image_height
         
-        with VideoWriter("test.mp4",256,128,30) as video_writer:
+        with VideoWriter(output_path,w,h,fps) as video_writer:
             for real_frame in tqdm(self.open_video_as_generator()):
                 
                 real_frame,fake_frame = self.convert_real_frame_to_fake(real_frame)
@@ -60,9 +68,30 @@ class RenderFakeVideo():
                 real_and_fake = np.concatenate([real_frame,fake_frame],axis=1)
 
                 video_writer.write(real_and_fake)
+                
                 cv2.imshow("real_and_fake",real_and_fake)
 
                 cv2.waitKey(1)
+
+    def get_output_video_path(self):
+
+        datetime_str = datetime.datetime.now().strftime("%Y%m%d_%a_%H%M%S")
+
+        output_name = f"{self.video_path.stem}_model_{self.model_a_or_b}_{datetime_str}.mp4"
+        output_path = self.video_path.with_name(output_name)
+        return output_path
+
+    def get_input_video_properties(self):
+        video_path_str = str(self.video_path.resolve())
+
+        video_reader = cv2.VideoCapture(video_path_str)
+
+        fps = video_reader.get(cv2.CAP_PROP_FPS)
+
+        video_reader.release()
+
+        return fps
+
             
     def open_video_as_generator(self):
 
