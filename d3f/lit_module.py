@@ -2,6 +2,7 @@ import cv2
 import numpy as np
 import math
 import argparse
+import random
 import pytorch_lightning as pl
 import segmentation_models_pytorch
 import torch
@@ -13,6 +14,10 @@ from torch.utils.data import DataLoader
 from d3f.dataset.image_dataset import ImageDataset
 import albumentations as A
 from albumentations.pytorch import ToTensorV2
+
+from kornia import augmentation as K
+from kornia.augmentation import AugmentationSequential
+
 
 
 class LitModule(pl.LightningModule):
@@ -52,7 +57,7 @@ class LitModule(pl.LightningModule):
     def create_dataloader(self, path, mean, std):
         p = self.hparams
 
-        transform = self.create_augmentation_pipeline(mean,std)
+        transform = self.create_dataloader_augmentation_pipeline(mean,std)
 
         dataset = ImageDataset(
             path,
@@ -68,43 +73,11 @@ class LitModule(pl.LightningModule):
         
         return dataloader
 
-    def create_augmentation_pipeline(self,mean,std):
+    def create_dataloader_augmentation_pipeline(self,mean,std):
          return A.Compose([
-            # A.RandomRotate90(),
-            # A.Flip(),
-            # A.Transpose(),
-            # A.OneOf([
-            #     # A.IAAAdditiveGaussianNoise(),
-            #     A.GaussNoise(),
-            # ], p=0.2),
-            A.OneOf([
-                A.MotionBlur(p=.2),
-                A.MedianBlur(blur_limit=3, p=0.1),
-                A.Blur(blur_limit=3, p=0.1),
-            ], p=0.2),
-            A.ShiftScaleRotate(
-                shift_limit=0.1,
-                scale_limit=0.25,
-                rotate_limit=10,
-                border_mode=cv2.BORDER_CONSTANT,
-                value=0.0,
-                p=0.5,
-            ),
-            # A.OneOf([
-            #     A.OpticalDistortion(p=0.3),
-            #     A.GridDistortion(p=.1),
-            #     # A.IAAPiecewiseAffine(p=0.3),
-            # ], p=0.2),
-            A.OneOf([
-                A.CLAHE(clip_limit=2),
-
-                A.RandomBrightnessContrast(),            
-            ], p=0.3),
-            # A.HueSaturationValue(hue_shift_limit=60,p=0.1),
             A.Normalize(mean,std,max_pixel_value=1.0),
             ToTensorV2(),
         ])
-
 
     def configure_optimizers(self):
         p = self.hparams
@@ -130,16 +103,46 @@ class LitModule(pl.LightningModule):
         with torch.no_grad():
             fake = fake_model(real) 
 
-        real_prediction = real_model(fake)
+        aug_real, aug_fake = self.apply_the_same_augmentation_to_list_of_image_tensors([real,fake])
 
-        loss = self.mse_loss(real_prediction, real)
+        real_prediction = real_model(aug_fake)
+        
+        loss = self.mse_loss(real_prediction, aug_real)
 
         self.log_batch_as_image_grid(f"fake/{name}_to_fake", fake)
-        self.log_batch_as_image_grid(f"real_target/{name}", real)
-        self.log_batch_as_image_grid(f"real_prediction/{name}", real_prediction)
+        self.log_batch_as_image_grid(f"real/{name}", real)
+        self.log_batch_as_image_grid(f"model_input/{name}", aug_fake)
+        self.log_batch_as_image_grid(f"model_target/{name}", aug_real)
+        self.log_batch_as_image_grid(f"model_prediction/{name}", real_prediction)
         self.log(f"loss/train_{name}",loss)
 
         return loss
+
+
+    def apply_the_same_augmentation_to_list_of_image_tensors(self,image_tensor_list):
+        
+        random_seed = random.randint(0,2**32)
+
+        augmented_tensor_list = []
+
+        for image_tensor in image_tensor_list:
+
+            torch.manual_seed(random_seed)
+
+            aug_list = AugmentationSequential(
+                K.RandomAffine(
+                    degrees=10, 
+                    translate=[0.1, 0.1], 
+                    scale=[0.75, 1.25], 
+                    shear=10, 
+                    p=0.5),
+            )
+            augmented_image_tensor = aug_list(image_tensor)
+
+            augmented_tensor_list.append(augmented_image_tensor)
+
+
+        return augmented_tensor_list
         
     def log_batch_as_image_grid(self,tag, batch, first_batch_only=False):
 
