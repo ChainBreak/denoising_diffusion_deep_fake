@@ -29,7 +29,7 @@ class LitModule(pl.LightningModule):
         self.model_a = self.create_model_instance()
         self.model_b = self.create_model_instance()
 
-        self.mse_loss = nn.MSELoss()
+        self.criterion = nn.L1Loss()
 
         self.current_batch = 0
 
@@ -107,7 +107,7 @@ class LitModule(pl.LightningModule):
 
         real_prediction = real_model(aug_fake)
         
-        loss = self.mse_loss(real_prediction, aug_real)
+        loss = self.criterion(real_prediction, aug_real)
 
         self.log_batch_as_image_grid(f"fake/{name}_to_fake", fake)
         self.log_batch_as_image_grid(f"real/{name}", real)
