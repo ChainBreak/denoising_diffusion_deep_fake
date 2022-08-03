@@ -7,6 +7,8 @@ import pytorch_lightning as pl
 import segmentation_models_pytorch
 import torch
 import torch.nn as nn
+import torch.optim as optimizers
+import torch.optim.lr_scheduler as schedulers
 import torchvision.transforms as T
 import torchvision.transforms.functional as TF
 import torchvision
@@ -81,9 +83,14 @@ class LitModule(pl.LightningModule):
 
     def configure_optimizers(self):
         p = self.hparams
-        optimizer_a = torch.optim.Adam(self.model_a.parameters(), lr=p.learning_rate)
-        optimizer_b = torch.optim.Adam(self.model_b.parameters(), lr=p.learning_rate)
-        return [optimizer_a, optimizer_b]
+
+        optimizer_a = optimizers.Adam(self.model_a.parameters(), lr=p.learning_rate)
+        optimizer_b = optimizers.Adam(self.model_b.parameters(), lr=p.learning_rate)
+
+        scheduler_a = schedulers.CosineAnnealingLR(optimizer_a, T_max=p.cosine_scheduler_max_epoch)
+        scheduler_b = schedulers.CosineAnnealingLR(optimizer_b, T_max=p.cosine_scheduler_max_epoch)
+
+        return [optimizer_a, optimizer_b], [scheduler_a, scheduler_b]
 
     def training_step(self, batch, batch_idx, optimizer_idx):
         

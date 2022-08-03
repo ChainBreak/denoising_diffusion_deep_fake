@@ -1,6 +1,7 @@
 import yaml
 import argparse
 import pytorch_lightning as pl
+from pytorch_lightning.callbacks import LearningRateMonitor
 from d3f.lit_module import LitModule
 
 
@@ -17,9 +18,18 @@ def read_yaml_file_into_dict(yaml_file_path):
 
 def start_training(hparams_dict):
     lit_module = LitModule(**hparams_dict)
+
+    p = lit_module.hparams
+
+    callback_list = [
+        LearningRateMonitor(logging_interval='step')
+    ]
+
     trainer = pl.Trainer(
         gpus=1,
         log_every_n_steps=1,
+        max_epochs=p.max_epochs,
+        callbacks=callback_list,
         )
 
     trainer.fit(

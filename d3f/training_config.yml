@@ -1,5 +1,7 @@
 batch_size: 64
-learning_rate: 0.0002
+learning_rate: 0.001
+max_epochs: 1000
+cosine_scheduler_max_epoch: 1000
 num_workers: 8
 encoder_name: "resnet34"
 
