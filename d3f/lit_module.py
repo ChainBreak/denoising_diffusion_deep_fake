@@ -33,19 +33,19 @@ class LitModule(pl.LightningModule):
 
         self.criterion = nn.L1Loss()
 
-        self.current_batch = 0
+        self.automatic_optimization = False
 
     def create_model_instance(self):
         p = self.hparams
-        encoder_name = p["encoder_name"]
 
         model = segmentation_models_pytorch.Unet(
-            encoder_name=encoder_name,
+            encoder_name=p["encoder_name"],
             encoder_weights=None,
             in_channels=3,
             classes=3,
             activation=None,
         )
+
         return model
 
     def train_dataloader(self):
@@ -92,21 +92,20 @@ class LitModule(pl.LightningModule):
 
         return [optimizer_a, optimizer_b], [scheduler_a, scheduler_b]
 
-    def training_step(self, batch, batch_idx, optimizer_idx):
+    def training_step(self, batch, batch_idx):
         
         batch_a = batch["a"]["image"]
         batch_b = batch["b"]["image"]
 
-        if optimizer_idx == 0:
-            loss = self.training_step_for_one_model("a", batch_a, self.model_a, self.model_b)
+        self.training_step_for_one_model("a", batch_a, self.model_a, self.model_b, optimizer_idx=0)
+        self.training_step_for_one_model("b", batch_b, self.model_b, self.model_a, optimizer_idx=1)
             
-        if optimizer_idx == 1:
-            loss = self.training_step_for_one_model("b", batch_b, self.model_b, self.model_a)
-            
-        return loss
 
-    def training_step_for_one_model(self,name, real, real_model, fake_model):
+    def training_step_for_one_model(self,name, real, real_model, fake_model, optimizer_idx):
         
+        optimizer = self.optimizers()[optimizer_idx]
+        optimizer.zero_grad()
+
         with torch.no_grad():
             fake = fake_model(real) 
 
@@ -116,6 +115,9 @@ class LitModule(pl.LightningModule):
         
         loss = self.criterion(real_prediction, aug_real)
 
+        self.manual_backward(loss)
+        optimizer.step()
+
         self.log_batch_as_image_grid(f"fake/{name}_to_fake", fake)
         self.log_batch_as_image_grid(f"real/{name}", real)
         self.log_batch_as_image_grid(f"model_input/{name}", aug_fake)
@@ -123,7 +125,7 @@ class LitModule(pl.LightningModule):
         self.log_batch_as_image_grid(f"model_prediction/{name}", real_prediction)
         self.log(f"loss/train_{name}",loss)
 
-        return loss
+    
 
 
     def apply_the_same_augmentation_to_list_of_image_tensors(self,image_tensor_list):
