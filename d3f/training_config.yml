@@ -7,7 +7,7 @@ encoder_name: "resnet34"
 
 log_images_every_n_steps: 100
 
-number_of_denoise_steps: 1
+number_of_prediction_steps: 3
 
 data_path_a: "/home/thomas/datasets/denoising_diffusion_deep_fake/tom_w128_h128"
 mean_a: [128,128,128]

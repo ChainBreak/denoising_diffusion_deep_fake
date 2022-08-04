@@ -102,30 +102,49 @@ class LitModule(pl.LightningModule):
             
 
     def training_step_for_one_model(self,name, real, real_model, fake_model, optimizer_idx):
-        
+        p = self.hparams
+
         optimizer = self.optimizers()[optimizer_idx]
         optimizer.zero_grad()
 
-        with torch.no_grad():
-            fake = fake_model(real) 
+        steps = p.number_of_prediction_steps
 
-        aug_real, aug_fake = self.apply_the_same_augmentation_to_list_of_image_tensors([real,fake])
+        fake_image_list = self.iteratively_apply_model_return_all_predictions(fake_model, real, steps)
 
-        real_prediction = real_model(aug_fake)
-        
-        loss = self.criterion(real_prediction, aug_real)
+        loss_total = 0
 
-        self.manual_backward(loss)
+        for i,fake in enumerate(fake_image_list):
+            
+            aug_real, aug_fake = self.apply_the_same_augmentation_to_list_of_image_tensors([real,fake])
+
+            real_prediction = real_model(aug_fake)
+            
+            loss = self.criterion(real_prediction, aug_real)
+
+            self.manual_backward(loss)
+
+            loss_total += loss.item()
+
+            self.log_batch_as_image_grid(f"fake_{i}/{name}_to_fake", fake)
+            self.log_batch_as_image_grid(f"model_input_{i}/{name}", aug_fake)
+            self.log_batch_as_image_grid(f"model_target_{i}/{name}", aug_real)
+            self.log_batch_as_image_grid(f"model_prediction_{i}/{name}", real_prediction)
+
         optimizer.step()
 
-        self.log_batch_as_image_grid(f"fake/{name}_to_fake", fake)
         self.log_batch_as_image_grid(f"real/{name}", real)
-        self.log_batch_as_image_grid(f"model_input/{name}", aug_fake)
-        self.log_batch_as_image_grid(f"model_target/{name}", aug_real)
-        self.log_batch_as_image_grid(f"model_prediction/{name}", real_prediction)
-        self.log(f"loss/train_{name}",loss)
+        self.log(f"loss/train_{name}",loss_total)
 
     
+    def iteratively_apply_model_return_all_predictions(self,model, image, steps):
+        predicted_image_list = []
+
+        with torch.no_grad():
+            for i in range(steps):
+                image = model(image)
+                predicted_image_list.append(image)
+
+        return predicted_image_list
 
 
     def apply_the_same_augmentation_to_list_of_image_tensors(self,image_tensor_list):
