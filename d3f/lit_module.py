@@ -109,40 +109,45 @@ class LitModule(pl.LightningModule):
 
         steps = p.number_of_prediction_steps
 
-        fake_image_list = self.iteratively_apply_model_return_all_predictions(fake_model, real, steps)
+        fake = self.iteratively_apply_model_to_get_fake(fake_model, real, steps)
+
+        aug_real, aug_fake = self.apply_the_same_augmentation_to_list_of_image_tensors([real,fake])
 
         loss_total = 0
 
-        for i,fake in enumerate(fake_image_list):
-            
-            aug_real, aug_fake = self.apply_the_same_augmentation_to_list_of_image_tensors([real,fake])
+        model_input = aug_fake
 
-            real_prediction = real_model(aug_fake)
-            
-            loss = self.criterion(real_prediction, aug_real)
+        for i in range(steps):
+            model_prediction = real_model(model_input)
+                                    
+            loss = self.criterion(model_prediction, aug_real)
 
             self.manual_backward(loss)
 
             loss_total += loss.item()
 
-            self.log_batch_as_image_grid(f"fake_{i}/{name}_to_fake", fake)
-            self.log_batch_as_image_grid(f"model_input_{i}/{name}", aug_fake)
-            self.log_batch_as_image_grid(f"model_target_{i}/{name}", aug_real)
-            self.log_batch_as_image_grid(f"model_prediction_{i}/{name}", real_prediction)
+            self.log_batch_as_image_grid(f"model_input_{i}/{name}", model_input)
+            self.log_batch_as_image_grid(f"model_prediction_{i}/{name}", model_prediction)
+
+            model_input = model_prediction.detach()
 
         optimizer.step()
 
+        self.log_batch_as_image_grid(f"fake/{name}_to_fake", fake)
+        self.log_batch_as_image_grid(f"model_target/{name}", aug_real)
         self.log_batch_as_image_grid(f"real/{name}", real)
         self.log(f"loss/train_{name}",loss_total)
 
+    def iteratively_apply_model_to_get_fake(self,model, image, steps):
+        with torch.no_grad():
+            return self.iteratively_apply_model_return_all_predictions(model, image, steps)[-1]
     
     def iteratively_apply_model_return_all_predictions(self,model, image, steps):
         predicted_image_list = []
 
-        with torch.no_grad():
-            for i in range(steps):
-                image = model(image)
-                predicted_image_list.append(image)
+        for i in range(steps):
+            image = model(image.detach())
+            predicted_image_list.append(image)
 
         return predicted_image_list
 
