@@ -204,13 +204,15 @@ class LitModule(pl.LightningModule):
             return self.predict_fake_for_single_frame(real_bgr, self.model_b, p.mean_a, p.std_a)
 
     def predict_fake_for_single_frame(self, real_bgr, model, mean ,std ):
-
+        p = self.hparams
         mean = torch.tensor(mean,device=self.device)
         std = torch.tensor(std,device=self.device)
 
         input_tensor = self.cv2_to_tensor_normalised(real_bgr, mean, std)
 
-        output_tensor = model(input_tensor)
+        steps = p.number_of_prediction_steps
+
+        output_tensor = self.iteratively_apply_model_to_get_fake(model, input_tensor, steps)
 
         fake_bgr = self.tensor_cv2_to_denormalised(output_tensor, mean, std)
 
