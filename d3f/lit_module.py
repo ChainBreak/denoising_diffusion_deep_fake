@@ -78,8 +78,11 @@ class LitModule(pl.LightningModule):
     def configure_optimizers(self):
         p = self.hparams
 
-        optimizer_a = optimizers.Adam(self.model_a.parameters(), lr=p.learning_rate)
-        optimizer_b = optimizers.Adam(self.model_b.parameters(), lr=p.learning_rate)
+        b1 = p.adam_b1
+        b2 = p.adam_b2
+
+        optimizer_a = optimizers.Adam(self.model_a.parameters(), lr=p.learning_rate,betas=(b1,b2))
+        optimizer_b = optimizers.Adam(self.model_b.parameters(), lr=p.learning_rate,betas=(b1,b2))
 
         scheduler_a = schedulers.CosineAnnealingLR(optimizer_a, T_max=p.cosine_scheduler_max_epoch)
         scheduler_b = schedulers.CosineAnnealingLR(optimizer_b, T_max=p.cosine_scheduler_max_epoch)
