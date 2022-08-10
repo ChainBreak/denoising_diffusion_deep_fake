@@ -106,6 +106,13 @@ class LitModule(pl.LightningModule):
         
         with torch.no_grad():
             fake = fake_model(real) 
+            aug = K.RandomGaussianBlur(
+                kernel_size=(15,15), 
+                sigma=(3,3), 
+                keepdim=True, 
+                p=0.5, 
+            )
+            fake = aug(fake)
 
         aug_real, aug_fake = self.apply_the_same_augmentation_to_list_of_image_tensors([real,fake])
 
@@ -122,7 +129,6 @@ class LitModule(pl.LightningModule):
 
         return loss
 
-
     def apply_the_same_augmentation_to_list_of_image_tensors(self,image_tensor_list):
         
         random_seed = random.randint(0,2**32)
@@ -134,12 +140,7 @@ class LitModule(pl.LightningModule):
                     scale=[0.95, 1.05], 
                     shear=2, 
                     p=0.5),
-                K.RandomGaussianBlur(
-                    kernel_size=(15,15), 
-                    sigma=(3,3), 
-                    keepdim=True, 
-                    p=0.0, 
-                    )
+
             )
 
         augmented_tensor_list = []
