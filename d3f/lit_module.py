@@ -127,21 +127,28 @@ class LitModule(pl.LightningModule):
         
         random_seed = random.randint(0,2**32)
 
+        augmentation_sequence = AugmentationSequential(
+                K.RandomAffine(
+                    degrees=2, 
+                    translate=[0.1, 0.1], 
+                    scale=[0.95, 1.05], 
+                    shear=2, 
+                    p=0.5),
+                K.RandomGaussianBlur(
+                    kernel_size=(15,15), 
+                    sigma=(3,3), 
+                    keepdim=True, 
+                    p=0.0, 
+                    )
+            )
+
         augmented_tensor_list = []
 
         for image_tensor in image_tensor_list:
 
             torch.manual_seed(random_seed)
-
-            aug_list = AugmentationSequential(
-                K.RandomAffine(
-                    degrees=10, 
-                    translate=[0.1, 0.1], 
-                    scale=[0.75, 1.25], 
-                    shear=10, 
-                    p=0.5),
-            )
-            augmented_image_tensor = aug_list(image_tensor)
+            
+            augmented_image_tensor = augmentation_sequence(image_tensor)
 
             augmented_tensor_list.append(augmented_image_tensor)
 
