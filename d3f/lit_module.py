@@ -19,6 +19,8 @@ from kornia import augmentation as K
 from kornia.augmentation import AugmentationSequential
 from kornia.filters import gaussian_blur2d
 
+from focal_frequency_loss import FocalFrequencyLoss
+
 
 
 class LitModule(pl.LightningModule):
@@ -30,7 +32,10 @@ class LitModule(pl.LightningModule):
         self.model_a = self.create_model_instance()
         self.model_b = self.create_model_instance()
 
-        self.criterion = nn.L1Loss()
+        self.loss_function = FocalFrequencyLoss(
+            loss_weight=1.0, 
+            alpha=1.0,
+            )
 
         self.shared_augmentation_sequence = self.create_shared_augmentation_sequence()
 
@@ -131,7 +136,7 @@ class LitModule(pl.LightningModule):
 
         real_prediction = real_model(aug_fake)
         
-        loss = self.criterion(real_prediction, aug_real)
+        loss = self.loss_function(real_prediction, aug_real)
 
         self.log_batch_as_image_grid(f"1_real/{name}", real)
         self.log_batch_as_image_grid(f"2_fake/{name}_to_fake", fake)
