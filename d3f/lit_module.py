@@ -31,7 +31,9 @@ class LitModule(pl.LightningModule):
 
         self.criterion = nn.L1Loss()
 
-        self.current_batch = 0
+        self.fake_only_augmentation_sequence = self.create_fake_only_augmentation_sequence()
+
+        self.shared_augmentation_sequence = self.create_shared_augmentation_sequence()
 
     def create_model_instance(self):
         p = self.hparams
@@ -45,6 +47,29 @@ class LitModule(pl.LightningModule):
             activation=None,
         )
         return model
+
+    def create_fake_only_augmentation_sequence(self):
+        augmentation_sequence = AugmentationSequential(
+            K.RandomGaussianBlur(
+                kernel_size=(15,15), 
+                sigma=(3,3), 
+                keepdim=True, 
+                p=0.5, 
+            ),
+        )
+        return augmentation_sequence
+
+    def create_shared_augmentation_sequence(self):
+        augmentation_sequence = AugmentationSequential(
+            K.RandomAffine(
+                degrees=2, 
+                translate=[0.1, 0.1], 
+                scale=[0.95, 1.05], 
+                shear=2, 
+                p=0.5,
+            ),
+        )
+        return augmentation_sequence
 
     def train_dataloader(self):
         p = self.hparams
@@ -105,16 +130,17 @@ class LitModule(pl.LightningModule):
     def training_step_for_one_model(self,name, real, real_model, fake_model):
         
         with torch.no_grad():
+            # Generate the best fake we can
             fake = fake_model(real) 
-            aug = K.RandomGaussianBlur(
-                kernel_size=(15,15), 
-                sigma=(3,3), 
-                keepdim=True, 
-                p=0.5, 
-            )
-            fake = aug(fake)
 
-        aug_real, aug_fake = self.apply_the_same_augmentation_to_list_of_image_tensors([real,fake])
+            # Augment the fake to make the real model work harder to produce a clean reconstruction
+            fake = self.fake_only_augmentation_sequence(fake)
+
+            # Force the real model to copy context by augmenting both the real and fake
+            aug_real, aug_fake = self.apply_the_same_augmentation_to_list_of_image_tensors(
+                image_tensor_list=[real,fake],
+                augmentation_sequence=self.shared_augmentation_sequence,
+            )
 
         real_prediction = real_model(aug_fake)
         
@@ -129,19 +155,9 @@ class LitModule(pl.LightningModule):
 
         return loss
 
-    def apply_the_same_augmentation_to_list_of_image_tensors(self,image_tensor_list):
+    def apply_the_same_augmentation_to_list_of_image_tensors(self,image_tensor_list, augmentation_sequence):
         
         random_seed = random.randint(0,2**32)
-
-        augmentation_sequence = AugmentationSequential(
-                K.RandomAffine(
-                    degrees=2, 
-                    translate=[0.1, 0.1], 
-                    scale=[0.95, 1.05], 
-                    shear=2, 
-                    p=0.5),
-
-            )
 
         augmented_tensor_list = []
 
