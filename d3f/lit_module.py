@@ -14,8 +14,6 @@ import torchvision.transforms.functional as TF
 import torchvision
 from torch.utils.data import DataLoader
 from d3f.dataset.image_dataset import ImageDataset
-import albumentations as A
-from albumentations.pytorch import ToTensorV2
 
 from kornia import augmentation as K
 from kornia.augmentation import AugmentationSequential
@@ -59,11 +57,13 @@ class LitModule(pl.LightningModule):
     def create_dataloader(self, path, mean, std):
         p = self.hparams
 
-        transform = self.create_dataloader_augmentation_pipeline(mean,std)
+        transform = nn.Sequential(
+            T.Normalize(mean,std),
+        )
 
         dataset = ImageDataset(
             path,
-            albumentations_transform=transform,
+            transform=transform,
             )
 
         dataloader = DataLoader(
@@ -74,12 +74,6 @@ class LitModule(pl.LightningModule):
             )
         
         return dataloader
-
-    def create_dataloader_augmentation_pipeline(self,mean,std):
-         return A.Compose([
-            A.Normalize(mean,std,max_pixel_value=1.0),
-            ToTensorV2(),
-        ])
 
     def configure_optimizers(self):
         p = self.hparams
@@ -94,8 +88,8 @@ class LitModule(pl.LightningModule):
 
     def training_step(self, batch, batch_idx, optimizer_idx):
         
-        batch_a = batch["a"]["image"]
-        batch_b = batch["b"]["image"]
+        batch_a = batch["a"]
+        batch_b = batch["b"]
 
         if optimizer_idx == 0:
             loss = self.training_step_for_one_model("a", batch_a, self.model_a, self.model_b)

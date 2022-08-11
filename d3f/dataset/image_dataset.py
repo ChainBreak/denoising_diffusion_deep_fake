@@ -1,18 +1,15 @@
-import cv2
 import torch
 from torch.utils.data import Dataset
 from pathlib import Path
 from itertools import chain
-
-import albumentations as A
-
+import torchvision.io 
 
 
 class ImageDataset(Dataset):
     
-    def __init__(self,root_path, albumentations_transform=None):
+    def __init__(self,root_path, transform=None):
         self.root_path = Path(root_path)
-        self.albumentations_transform = albumentations_transform
+        self.transform = transform
         self.image_path_list = self.get_list_of_image_paths()
 
     def get_list_of_image_paths(self):
@@ -28,11 +25,10 @@ class ImageDataset(Dataset):
         image_path = self.image_path_list[index]
         image_path = str(image_path.resolve())
 
-        image = cv2.imread(image_path)
-        image = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
+        image = torchvision.io.read_image(image_path).float()
 
-        if self.albumentations_transform is not None:
-            image = self.albumentations_transform(image=image)
+        if self.transform is not None:
+            image = self.transform(image)
 
         return image
         
