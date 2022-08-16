@@ -34,7 +34,7 @@ class LitModule(pl.LightningModule):
 
         self.loss_function = FocalFrequencyLoss(
             loss_weight=1.0, 
-            alpha=1.0,
+            alpha=0.5,
             )
 
         self.shared_augmentation_sequence = self.create_shared_augmentation_sequence()
@@ -196,7 +196,6 @@ class LitModule(pl.LightningModule):
             augmented_image_tensor = augmentation_sequence(image_tensor)
 
             augmented_tensor_list.append(augmented_image_tensor)
-
 
         return augmented_tensor_list
         
