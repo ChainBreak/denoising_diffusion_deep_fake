@@ -4,12 +4,13 @@ adam_b1: 0.5
 adam_b2: 0.999
 max_epochs: 1000
 cosine_scheduler_max_epoch: 1000
+noise_scheduler_max_epoch: 1000
 num_workers: 8
 encoder_name: "resnet34"
 
 log_images_every_n_steps: 100
 
-number_of_denoise_steps: 1
+
 
 data_path_a: "/home/thomas/datasets/denoising_diffusion_deep_fake/tom_w128_h128"
 mean_a: [128,128,128]

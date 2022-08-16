@@ -1,6 +1,7 @@
 import cv2
 import numpy as np
 import math
+from math import sqrt
 import argparse
 import random
 import pytorch_lightning as pl
@@ -31,8 +32,6 @@ class LitModule(pl.LightningModule):
 
         self.criterion = nn.L1Loss()
 
-        self.fake_only_augmentation_sequence = self.create_fake_only_augmentation_sequence()
-
         self.shared_augmentation_sequence = self.create_shared_augmentation_sequence()
 
     def create_model_instance(self):
@@ -48,24 +47,13 @@ class LitModule(pl.LightningModule):
         )
         return model
 
-    def create_fake_only_augmentation_sequence(self):
-        augmentation_sequence = AugmentationSequential(
-            K.RandomGaussianBlur(
-                kernel_size=(15,15), 
-                sigma=(3,3), 
-                keepdim=True, 
-                p=0.5, 
-            ),
-        )
-        return augmentation_sequence
-
     def create_shared_augmentation_sequence(self):
         augmentation_sequence = AugmentationSequential(
             K.RandomAffine(
-                degrees=2, 
+                degrees=10, 
                 translate=[0.1, 0.1], 
-                scale=[0.95, 1.05], 
-                shear=2, 
+                scale=[0.75, 1.25], 
+                shear=10, 
                 p=0.5,
             ),
         )
@@ -130,30 +118,46 @@ class LitModule(pl.LightningModule):
     def training_step_for_one_model(self,name, real, real_model, fake_model):
         
         with torch.no_grad():
-            # Generate the best fake we can
-            fake = fake_model(real) 
 
-            # Augment the fake to make the real model work harder to produce a clean reconstruction
-            fake = self.fake_only_augmentation_sequence(fake)
+            noisy_real = self.add_scheduled_amount_of_noise(real)
+
+            # Generate the best fake we can
+            fake = fake_model(noisy_real) 
+
+            noisy_fake = self.add_scheduled_amount_of_noise(fake)
 
             # Force the real model to copy context by augmenting both the real and fake
-            aug_real, aug_fake = self.apply_the_same_augmentation_to_list_of_image_tensors(
-                image_tensor_list=[real,fake],
+            aug_real, aug_noisy_fake = self.apply_the_same_augmentation_to_list_of_image_tensors(
+                image_tensor_list=[real, noisy_fake],
                 augmentation_sequence=self.shared_augmentation_sequence,
             )
 
-        real_prediction = real_model(aug_fake)
+        real_prediction = real_model(aug_noisy_fake)
         
         loss = self.criterion(real_prediction, aug_real)
 
-        self.log_batch_as_image_grid(f"fake/{name}_to_fake", fake)
         self.log_batch_as_image_grid(f"real/{name}", real)
-        self.log_batch_as_image_grid(f"model_input/{name}", aug_fake)
+        self.log_batch_as_image_grid(f"noisy_real/{name}", noisy_real)
+        self.log_batch_as_image_grid(f"fake/{name}_to_fake", fake)
+        self.log_batch_as_image_grid(f"noisy_fake/{name}_to_fake", noisy_fake)
+        self.log_batch_as_image_grid(f"model_input/{name}", aug_noisy_fake)
         self.log_batch_as_image_grid(f"model_target/{name}", aug_real)
         self.log_batch_as_image_grid(f"model_prediction/{name}", real_prediction)
         self.log(f"loss/train_{name}",loss)
 
         return loss
+
+    def add_scheduled_amount_of_noise(self,image):
+        p = self.hparams
+
+        alpha = self.current_epoch / p.noise_scheduler_max_epoch
+        alpha = min(alpha,1.0)
+
+        noise = torch.randn_like(image)
+
+        noisy_image = sqrt(alpha)*image + sqrt(1-alpha)*noise
+
+        return noisy_image
 
     def apply_the_same_augmentation_to_list_of_image_tensors(self,image_tensor_list, augmentation_sequence):
         
