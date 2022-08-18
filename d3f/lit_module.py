@@ -124,13 +124,13 @@ class LitModule(pl.LightningModule):
             # Generate the best fake we can
             fake = fake_model(noisy_real) 
 
-            noisy_fake = self.add_scheduled_amount_of_noise(fake)
-
             # Force the real model to copy context by augmenting both the real and fake
-            aug_real, aug_noisy_fake = self.apply_the_same_augmentation_to_list_of_image_tensors(
-                image_tensor_list=[real, noisy_fake],
+            aug_real, aug_fake = self.apply_the_same_augmentation_to_list_of_image_tensors(
+                image_tensor_list=[real, fake],
                 augmentation_sequence=self.shared_augmentation_sequence,
             )
+
+            aug_noisy_fake = self.add_scheduled_amount_of_noise(aug_fake)
 
         real_prediction = real_model(aug_noisy_fake)
         
@@ -139,7 +139,6 @@ class LitModule(pl.LightningModule):
         self.log_batch_as_image_grid(f"real/{name}", real)
         self.log_batch_as_image_grid(f"noisy_real/{name}", noisy_real)
         self.log_batch_as_image_grid(f"fake/{name}_to_fake", fake)
-        self.log_batch_as_image_grid(f"noisy_fake/{name}_to_fake", noisy_fake)
         self.log_batch_as_image_grid(f"model_input/{name}", aug_noisy_fake)
         self.log_batch_as_image_grid(f"model_target/{name}", aug_real)
         self.log_batch_as_image_grid(f"model_prediction/{name}", real_prediction)
