@@ -150,9 +150,9 @@ class LitModule(pl.LightningModule):
         r = torch.rand(
             size=(b,1,1,1),
             device=self.device,
-        )
+        ) ** 3
 
-        noisy_batch = torch.sqrt(r) * batch + torch.sqrt(1-r)*noise
+        noisy_batch = torch.sqrt(1-r) * batch + torch.sqrt(r)*noise
 
         return noisy_batch
 
