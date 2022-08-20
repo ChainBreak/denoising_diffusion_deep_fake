@@ -1,7 +1,6 @@
 import cv2
 import numpy as np
 import math
-from math import sqrt
 import argparse
 import random
 import pytorch_lightning as pl
@@ -119,7 +118,7 @@ class LitModule(pl.LightningModule):
         
         with torch.no_grad():
 
-            noisy_real = self.add_scheduled_amount_of_noise(real)
+            noisy_real = self.blend_random_amount_of_noise_with_each_sample(real)
 
             # Generate the best fake we can
             fake = fake_model(noisy_real) 
@@ -130,7 +129,7 @@ class LitModule(pl.LightningModule):
                 augmentation_sequence=self.shared_augmentation_sequence,
             )
 
-            aug_noisy_fake = self.add_scheduled_amount_of_noise(aug_fake)
+            aug_noisy_fake = self.blend_random_amount_of_noise_with_each_sample(aug_fake)
 
         real_prediction = real_model(aug_noisy_fake)
         
@@ -146,17 +145,19 @@ class LitModule(pl.LightningModule):
 
         return loss
 
-    def add_scheduled_amount_of_noise(self,image):
-        p = self.hparams
+    def blend_random_amount_of_noise_with_each_sample(self,batch):
+        noise = torch.randn_like(batch)
 
-        alpha = self.current_epoch / p.noise_scheduler_max_epoch
-        alpha = min(alpha,1.0)
+        b,c,h,w = batch.shape
 
-        noise = torch.randn_like(image)
+        r = torch.rand(
+            size=(b,1,1,1),
+            device=self.device,
+        )
 
-        noisy_image = sqrt(alpha)*image + sqrt(1-alpha)*noise
+        noisy_batch = torch.sqrt(r) * batch + torch.sqrt(1-r)*noise
 
-        return noisy_image
+        return noisy_batch
 
     def apply_the_same_augmentation_to_list_of_image_tensors(self,image_tensor_list, augmentation_sequence):
         
