@@ -118,10 +118,8 @@ class LitModule(pl.LightningModule):
         
         with torch.no_grad():
 
-            noisy_real = self.blend_random_amount_of_noise_with_each_sample(real)
-
             # Generate the best fake we can
-            fake = fake_model(noisy_real) 
+            fake = fake_model(real) 
 
             # Force the real model to copy context by augmenting both the real and fake
             aug_real, aug_fake = self.apply_the_same_augmentation_to_list_of_image_tensors(
@@ -136,7 +134,6 @@ class LitModule(pl.LightningModule):
         loss = self.criterion(real_prediction, aug_real)
 
         self.log_batch_as_image_grid(f"real/{name}", real)
-        self.log_batch_as_image_grid(f"noisy_real/{name}", noisy_real)
         self.log_batch_as_image_grid(f"fake/{name}_to_fake", fake)
         self.log_batch_as_image_grid(f"model_input/{name}", aug_noisy_fake)
         self.log_batch_as_image_grid(f"model_target/{name}", aug_real)
