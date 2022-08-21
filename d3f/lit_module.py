@@ -17,6 +17,7 @@ from d3f.dataset.image_dataset import ImageDataset
 
 from kornia import augmentation as K
 from kornia.augmentation import AugmentationSequential
+from kornia.filters import gaussian_blur2d
 
 
 
@@ -49,15 +50,32 @@ class LitModule(pl.LightningModule):
         return model
 
     def create_fake_only_augmentation_sequence(self):
-        augmentation_sequence = AugmentationSequential(
-            K.RandomGaussianBlur(
-                kernel_size=(15,15), 
-                sigma=(3,3), 
-                keepdim=True, 
-                p=0.5, 
-            ),
-        )
-        return augmentation_sequence
+        kernel_size_list = [None,3,5,7,9,11,15,17]
+
+        def random_blur_closure(batch):
+            b,c,h,w = batch.shape
+
+            for sample_i in range(b):
+
+                blur_i = sample_i % len(kernel_size_list)
+
+                kernel_size = kernel_size_list[blur_i]
+
+                if kernel_size == None: 
+                    continue
+
+                sigma = kernel_size / 2.0
+
+                batch[sample_i] = gaussian_blur2d(
+                        input=batch[sample_i].unsqueeze(0),
+                        kernel_size=(kernel_size,kernel_size),
+                        sigma=(sigma,sigma),
+                    ).squeeze(0)
+
+            return batch
+
+        return random_blur_closure
+
 
     def create_shared_augmentation_sequence(self):
         augmentation_sequence = AugmentationSequential(
@@ -68,6 +86,7 @@ class LitModule(pl.LightningModule):
                 shear=2, 
                 p=0.5,
             ),
+            
         )
         return augmentation_sequence
 
