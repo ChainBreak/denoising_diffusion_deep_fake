@@ -32,8 +32,6 @@ class LitModule(pl.LightningModule):
 
         self.criterion = nn.L1Loss()
 
-        self.fake_only_augmentation_sequence = self.create_fake_only_augmentation_sequence()
-
         self.shared_augmentation_sequence = self.create_shared_augmentation_sequence()
 
     def create_model_instance(self):
@@ -48,34 +46,6 @@ class LitModule(pl.LightningModule):
             activation=None,
         )
         return model
-
-    def create_fake_only_augmentation_sequence(self):
-        kernel_size_list = [None,3,5,7,9,11,15,17]
-
-        def random_blur_closure(batch):
-            b,c,h,w = batch.shape
-
-            for sample_i in range(b):
-
-                blur_i = sample_i % len(kernel_size_list)
-
-                kernel_size = kernel_size_list[blur_i]
-
-                if kernel_size == None: 
-                    continue
-
-                sigma = kernel_size / 2.0
-
-                batch[sample_i] = gaussian_blur2d(
-                        input=batch[sample_i].unsqueeze(0),
-                        kernel_size=(kernel_size,kernel_size),
-                        sigma=(sigma,sigma),
-                    ).squeeze(0)
-
-            return batch
-
-        return random_blur_closure
-
 
     def create_shared_augmentation_sequence(self):
         augmentation_sequence = AugmentationSequential(
@@ -152,12 +122,10 @@ class LitModule(pl.LightningModule):
             # Generate the best fake we can
             fake = fake_model(real) 
 
-            # Augment the fake to make the real model work harder to produce a clean reconstruction
-            fake = self.fake_only_augmentation_sequence(fake)
+            blured_fake = self.apply_random_blur_to_each_sample_in_batch(fake)
 
-            # Force the real model to copy context by augmenting both the real and fake
             aug_real, aug_fake = self.apply_the_same_augmentation_to_list_of_image_tensors(
-                image_tensor_list=[real,fake],
+                image_tensor_list=[real,blured_fake],
                 augmentation_sequence=self.shared_augmentation_sequence,
             )
 
@@ -165,14 +133,50 @@ class LitModule(pl.LightningModule):
         
         loss = self.criterion(real_prediction, aug_real)
 
-        self.log_batch_as_image_grid(f"fake/{name}_to_fake", fake)
-        self.log_batch_as_image_grid(f"real/{name}", real)
+        self.log_batch_as_image_grid(f"1_real/{name}", real)
+        self.log_batch_as_image_grid(f"2_fake/{name}_to_fake", fake)
+        self.log_batch_as_image_grid(f"blured_fake/{name}_to_fake", blured_fake)
         self.log_batch_as_image_grid(f"model_input/{name}", aug_fake)
         self.log_batch_as_image_grid(f"model_target/{name}", aug_real)
         self.log_batch_as_image_grid(f"model_prediction/{name}", real_prediction)
         self.log(f"loss/train_{name}",loss)
 
         return loss
+
+    def apply_random_blur_to_each_sample_in_batch(self,batch):
+        
+        b,c,h,w = batch.shape
+
+        batch = batch.clone()
+
+        # for each sample index in the batch
+        for i in range(b):
+            
+            kernel_size = self.pick_a_random_kernel_size_hparams_list()
+
+            if kernel_size == 0: 
+                continue
+
+            sigma = kernel_size / 2.0
+
+            batch[i] = gaussian_blur2d(
+                    input=batch[i].unsqueeze(0),
+                    kernel_size=(kernel_size,kernel_size),
+                    sigma=(sigma,sigma),
+                ).squeeze(0)
+
+        return batch
+
+    def pick_a_random_kernel_size_hparams_list(self):
+        p = self.hparams
+        
+        kernel_size = random.choices(
+                population=p.random_blur_kernel_size_list,
+                weights=p.random_blur_choice_weight_list,
+                k=1,
+            )[0]
+
+        return kernel_size
 
     def apply_the_same_augmentation_to_list_of_image_tensors(self,image_tensor_list, augmentation_sequence):
         

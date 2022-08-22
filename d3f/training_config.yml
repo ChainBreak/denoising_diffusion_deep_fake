@@ -9,7 +9,8 @@ encoder_name: "resnet34"
 
 log_images_every_n_steps: 100
 
-number_of_denoise_steps: 1
+random_blur_kernel_size_list: [0,3,5,7,9,11,15,17]
+random_blur_choice_weight_list: [3,1,1,1,1,1,1,1]
 
 data_path_a: "/home/thomas/datasets/denoising_diffusion_deep_fake/tom_w128_h128"
 mean_a: [128,128,128]
