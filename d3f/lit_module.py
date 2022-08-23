@@ -50,10 +50,10 @@ class LitModule(pl.LightningModule):
     def create_shared_augmentation_sequence(self):
         augmentation_sequence = AugmentationSequential(
             K.RandomAffine(
-                degrees=2, 
+                degrees=10, 
                 translate=[0.1, 0.1], 
-                scale=[0.95, 1.05], 
-                shear=2, 
+                scale=[0.75, 1.25], 
+                shear=10, 
                 p=0.5,
             ),
             
