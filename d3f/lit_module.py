@@ -152,9 +152,9 @@ class LitModule(pl.LightningModule):
         # for each sample index in the batch
         for i in range(b):
             
-            kernel_size = self.pick_a_random_kernel_size_hparams_list()
+            kernel_size = self.pick_a_random_kernel_size_for_blur(w,h)
 
-            if kernel_size == 0: 
+            if kernel_size <=1: 
                 continue
 
             sigma = kernel_size / 2.0
@@ -167,14 +167,21 @@ class LitModule(pl.LightningModule):
 
         return batch
 
-    def pick_a_random_kernel_size_hparams_list(self):
+    def pick_a_random_kernel_size_for_blur(self, image_width, image_height):
+
         p = self.hparams
         
-        kernel_size = random.choices(
-                population=p.random_blur_kernel_size_list,
-                weights=p.random_blur_choice_weight_list,
-                k=1,
-            )[0]
+        # Sampling the kernel size uniformly favours blury images.
+        # Instead sample the effective number of pixels after the blur 
+        # and calculate the kernel size to acheive it
+
+        total_number_of_pixels_in_image = image_width * image_height
+
+        effective_number_of_pixels_after_blur = random.randint(1, total_number_of_pixels_in_image)
+
+        kernel_size = math.sqrt(total_number_of_pixels_in_image / effective_number_of_pixels_after_blur)
+
+        kernel_size = int( round((kernel_size-1)/2) *2+1 )
 
         return kernel_size
 
@@ -191,7 +198,6 @@ class LitModule(pl.LightningModule):
             augmented_image_tensor = augmentation_sequence(image_tensor)
 
             augmented_tensor_list.append(augmented_image_tensor)
-
 
         return augmented_tensor_list
         
