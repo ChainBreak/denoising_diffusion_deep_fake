@@ -175,13 +175,26 @@ class LitModule(pl.LightningModule):
         # Instead sample the effective number of pixels after the blur 
         # and calculate the kernel size to acheive it
 
-        total_number_of_pixels_in_image = image_width * image_height
+        total_number_of_pixels_in_image = float(image_width * image_height)
 
-        effective_number_of_pixels_after_blur = random.randint(1, total_number_of_pixels_in_image)
+        max_bits = math.log2(total_number_of_pixels_in_image)
+
+        bits = random.random()*max_bits
+
+        effective_number_of_pixels_after_blur = 2**bits
 
         kernel_size = math.sqrt(total_number_of_pixels_in_image / effective_number_of_pixels_after_blur)
 
+        kernel_size /= 8
+
         kernel_size = int( round((kernel_size-1)/2) *2+1 )
+
+        # print(f" \
+        #     total_pixels: {total_number_of_pixels_in_image}, \
+        #     max_bits: {max_bits}, \
+        #     bits: {bits}, \
+        #     kernel_size: {kernel_size}, \
+        #     ")
 
         return kernel_size
 
