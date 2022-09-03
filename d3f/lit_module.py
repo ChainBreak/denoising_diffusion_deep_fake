@@ -151,39 +151,39 @@ class LitModule(pl.LightningModule):
 
         # for each sample index in the batch
         for i in range(b):
+            batch[i] = self.apply_down_up_interpolation_blur(batch[i].unsqueeze(0)).squeeze(0)
             
-            kernel_size = self.pick_a_random_kernel_size_for_blur(w,h)
+        return batch
 
-            if kernel_size <=1: 
-                continue
+    def apply_down_up_interpolation_blur(self,batch):
+        b,c,h,w = batch.shape
 
-            sigma = kernel_size / 2.0
+        number_of_interpolations = self.pick_a_random_number_of_down_up_interpolations(w,h)
 
-            batch[i] = gaussian_blur2d(
-                    input=batch[i].unsqueeze(0),
-                    kernel_size=(kernel_size,kernel_size),
-                    sigma=(sigma,sigma),
-                ).squeeze(0)
+        down_steps = list(range(0,number_of_interpolations))
+        up_steps = down_steps[::-1][1:]
+        down_up_steps = down_steps + up_steps
+
+
+        for i in down_up_steps:
+            
+            batch = nn.functional.interpolate(
+                input=batch,
+                size = (h//(2**i),w//(2**i)),
+                mode="bilinear",
+            )
 
         return batch
 
-    def pick_a_random_kernel_size_for_blur(self, image_width, image_height):
+            
 
-        p = self.hparams
-        
-        # Sampling the kernel size uniformly favours blury images.
-        # Instead sample the effective number of pixels after the blur 
-        # and calculate the kernel size to acheive it
+    def pick_a_random_number_of_down_up_interpolations(self, image_width, image_height):
 
-        total_number_of_pixels_in_image = image_width * image_height
+        size = min(image_width, image_height)
 
-        effective_number_of_pixels_after_blur = random.randint(1, total_number_of_pixels_in_image)
+        log_size = int(math.log2(size))
 
-        kernel_size = math.sqrt(total_number_of_pixels_in_image / effective_number_of_pixels_after_blur)
-
-        kernel_size = int( round((kernel_size-1)/2) *2+1 )
-
-        return kernel_size
+        return random.randint(0,log_size)
 
     def apply_the_same_augmentation_to_list_of_image_tensors(self,image_tensor_list, augmentation_sequence):
         
