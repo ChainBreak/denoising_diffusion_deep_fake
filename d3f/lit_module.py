@@ -156,6 +156,7 @@ class LitModule(pl.LightningModule):
         return batch
 
     def apply_down_up_interpolation_blur(self,batch):
+
         b,c,h,w = batch.shape
 
         number_of_interpolations = self.pick_a_random_number_of_down_up_interpolations(w,h)
@@ -175,8 +176,6 @@ class LitModule(pl.LightningModule):
 
         return batch
 
-            
-
     def pick_a_random_number_of_down_up_interpolations(self, image_width, image_height):
 
         size = min(image_width, image_height)
@@ -187,15 +186,18 @@ class LitModule(pl.LightningModule):
 
     def apply_the_same_augmentation_to_list_of_image_tensors(self,image_tensor_list, augmentation_sequence):
         
-        random_seed = random.randint(0,2**32)
-
         augmented_tensor_list = []
+
+        augmentation_params = None
 
         for image_tensor in image_tensor_list:
 
-            torch.manual_seed(random_seed)
-            
-            augmented_image_tensor = augmentation_sequence(image_tensor)
+            augmented_image_tensor = augmentation_sequence(
+                image_tensor,
+                params=augmentation_params)
+
+            if augmentation_params == None:
+                augmentation_params = augmentation_sequence._params
 
             augmented_tensor_list.append(augmented_image_tensor)
 
