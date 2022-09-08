@@ -50,11 +50,11 @@ class LitModule(pl.LightningModule):
     def create_shared_augmentation_sequence(self):
         augmentation_sequence = AugmentationSequential(
             K.RandomAffine(
-                degrees=10, 
-                translate=[0.1, 0.1], 
+                degrees=15, 
+                translate=[0.2, 0.2], 
                 scale=[0.75, 1.25], 
-                shear=10, 
-                p=0.5,
+                shear=15, 
+                p=1.0,
             ),
             
         )
@@ -119,70 +119,78 @@ class LitModule(pl.LightningModule):
     def training_step_for_one_model(self,name, real, real_model, fake_model):
         
         with torch.no_grad():
-            # Generate the best fake we can
-            fake = fake_model(real) 
+            
+            blured_real = self.apply_scheduled_amount_of_blur(real)
 
-            blured_fake = self.apply_random_blur_to_each_sample_in_batch(fake)
+            fake = fake_model(blured_real) 
 
             aug_real, aug_fake = self.apply_the_same_augmentation_to_list_of_image_tensors(
-                image_tensor_list=[real,blured_fake],
+                image_tensor_list=[real,fake],
                 augmentation_sequence=self.shared_augmentation_sequence,
             )
 
-        real_prediction = real_model(aug_fake)
+            aug_blured_fake = self.apply_scheduled_amount_of_blur(aug_fake)
+
+        real_prediction = real_model(aug_blured_fake)
         
         loss = self.criterion(real_prediction, aug_real)
 
         self.log_batch_as_image_grid(f"1_real/{name}", real)
-        self.log_batch_as_image_grid(f"2_fake/{name}_to_fake", fake)
-        self.log_batch_as_image_grid(f"blured_fake/{name}_to_fake", blured_fake)
-        self.log_batch_as_image_grid(f"model_input/{name}", aug_fake)
-        self.log_batch_as_image_grid(f"model_target/{name}", aug_real)
-        self.log_batch_as_image_grid(f"model_prediction/{name}", real_prediction)
+        self.log_batch_as_image_grid(f"2_blured_real/{name}", blured_real)
+        self.log_batch_as_image_grid(f"3_fake/{name}_to_fake", fake)
+        self.log_batch_as_image_grid(f"4_model_input/{name}", aug_blured_fake)
+        self.log_batch_as_image_grid(f"5_model_prediction/{name}", real_prediction)
+        self.log_batch_as_image_grid(f"6_model_target/{name}", aug_real)
         self.log(f"loss/train_{name}",loss)
 
         return loss
 
-    def apply_random_blur_to_each_sample_in_batch(self,batch):
-        
-        b,c,h,w = batch.shape
+    def apply_scheduled_amount_of_blur(self,image_batch):
+        p = self.hparams
 
-        batch = batch.clone()
+        b,c,h,w = image_batch.shape
 
-        # for each sample index in the batch
-        for i in range(b):
-            batch[i] = self.apply_down_up_interpolation_blur(batch[i].unsqueeze(0)).squeeze(0)
-            
-        return batch
+        ratio = self.current_epoch / p.max_epochs
 
-    def apply_down_up_interpolation_blur(self,batch):
+        size = min(w, h)
 
-        b,c,h,w = batch.shape
+        number_of_effective_pixels = self.linear_interpolation(ratio, 0.0, 1.0, 1.0, size)
 
-        number_of_interpolations = self.pick_a_random_number_of_down_up_interpolations(w,h)
+        number_of_interpolations = int (math.log2(size / number_of_effective_pixels) )
+       
+        image_batch = self.apply_down_up_interpolation_blur(image_batch, number_of_interpolations)
+
+        return image_batch
+
+    def apply_down_up_interpolation_blur(self,image_batch, number_of_interpolations):
+
+        b,c,h,w = image_batch.shape
 
         down_steps = list(range(0,number_of_interpolations))
         up_steps = down_steps[::-1][1:]
         down_up_steps = down_steps + up_steps
 
-
         for i in down_up_steps:
             
-            batch = nn.functional.interpolate(
-                input=batch,
+            image_batch = nn.functional.interpolate(
+                input=image_batch,
                 size = (h//(2**i),w//(2**i)),
                 mode="bilinear",
             )
 
-        return batch
+        return image_batch
 
-    def pick_a_random_number_of_down_up_interpolations(self, image_width, image_height):
+    @staticmethod
+    def linear_interpolation(x,x1,x2,y1,y2):
+        
+        y = (x-x1) / (x2-x1) * (y2-y1) + y1
 
-        size = min(image_width, image_height)
+        y_min = min(y1,y2)
+        y_max = max(y1,y2)
 
-        log_size = int(math.log2(size))
+        y = min(y_max,max(y_min,y))
 
-        return random.randint(0,log_size)
+        return y
 
     def apply_the_same_augmentation_to_list_of_image_tensors(self,image_tensor_list, augmentation_sequence):
         
