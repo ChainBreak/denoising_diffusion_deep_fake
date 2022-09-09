@@ -50,11 +50,13 @@ class LitModule(pl.LightningModule):
     def create_shared_augmentation_sequence(self):
         augmentation_sequence = AugmentationSequential(
             K.RandomAffine(
-                degrees=15, 
-                translate=[0.2, 0.2], 
-                scale=[0.75, 1.25], 
-                shear=15, 
+                degrees=10, 
+                translate=[0.15, 0.15], 
+                scale=[0.8, 1.2], 
+                shear=10, 
+                padding_mode="border",
                 p=1.0,
+
             ),
             
         )
@@ -129,18 +131,19 @@ class LitModule(pl.LightningModule):
                 augmentation_sequence=self.shared_augmentation_sequence,
             )
 
+            aug_blured_real = self.apply_scheduled_amount_of_blur(aug_real)
             aug_blured_fake = self.apply_scheduled_amount_of_blur(aug_fake)
 
         real_prediction = real_model(aug_blured_fake)
         
-        loss = self.criterion(real_prediction, aug_real)
+        loss = self.criterion(real_prediction, aug_blured_real)
 
         self.log_batch_as_image_grid(f"1_real/{name}", real)
         self.log_batch_as_image_grid(f"2_blured_real/{name}", blured_real)
         self.log_batch_as_image_grid(f"3_fake/{name}_to_fake", fake)
         self.log_batch_as_image_grid(f"4_model_input/{name}", aug_blured_fake)
         self.log_batch_as_image_grid(f"5_model_prediction/{name}", real_prediction)
-        self.log_batch_as_image_grid(f"6_model_target/{name}", aug_real)
+        self.log_batch_as_image_grid(f"6_model_target/{name}", aug_blured_real)
         self.log(f"loss/train_{name}",loss)
 
         return loss
@@ -157,6 +160,9 @@ class LitModule(pl.LightningModule):
         number_of_effective_pixels = self.linear_interpolation(ratio, 0.0, 1.0, 1.0, size)
 
         number_of_interpolations = int (math.log2(size / number_of_effective_pixels) )
+
+        self.log("number_of_effective_pixels",number_of_effective_pixels)
+        self.log("number_of_interpolations",number_of_interpolations)
        
         image_batch = self.apply_down_up_interpolation_blur(image_batch, number_of_interpolations)
 
@@ -166,7 +172,7 @@ class LitModule(pl.LightningModule):
 
         b,c,h,w = image_batch.shape
 
-        down_steps = list(range(0,number_of_interpolations))
+        down_steps = list(range(0,number_of_interpolations+1))
         up_steps = down_steps[::-1][1:]
         down_up_steps = down_steps + up_steps
 
