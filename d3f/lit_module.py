@@ -29,7 +29,7 @@ class LitModule(pl.LightningModule):
         self.model_a = self.create_model_instance()
         self.model_b = self.create_model_instance()
 
-        self.criterion = nn.L1Loss()
+        self.criterion = nn.MSELoss()
 
         self.shared_augmentation_sequence = self.create_shared_augmentation_sequence()
 
@@ -53,7 +53,7 @@ class LitModule(pl.LightningModule):
                 translate=[0.1, 0.1], 
                 scale=[0.75, 1.25], 
                 shear=10, 
-                p=0.5,
+                p=0.0,
             ),
         )
         return augmentation_sequence
@@ -133,8 +133,8 @@ class LitModule(pl.LightningModule):
         
         loss = self.criterion(real_prediction, aug_real)
 
-        self.log_batch_as_image_grid(f"real/{name}", real)
-        self.log_batch_as_image_grid(f"fake/{name}_to_fake", fake)
+        self.log_batch_as_image_grid(f"1_real/{name}", real)
+        self.log_batch_as_image_grid(f"2_fake/{name}_to_fake", fake)
         self.log_batch_as_image_grid(f"model_input/{name}", aug_noisy_fake)
         self.log_batch_as_image_grid(f"model_target/{name}", aug_real)
         self.log_batch_as_image_grid(f"model_prediction/{name}", real_prediction)
@@ -147,14 +147,28 @@ class LitModule(pl.LightningModule):
 
         b,c,h,w = batch.shape
 
-        r = torch.rand(
-            size=(b,1,1,1),
-            device=self.device,
-        ) ** 6
+        r = self.sample_random_number_from_exponential_distribution(b)
 
         noisy_batch = torch.sqrt(1-r) * batch + torch.sqrt(r)*noise
 
         return noisy_batch
+
+    def sample_random_number_from_exponential_distribution(self,batch_size):
+        p = self.hparams
+
+        lam = p.exponential_sampling_lambda
+
+        y = torch.rand(
+            size=(batch_size,1,1,1),
+            device=self.device,
+        )
+
+        c = 1/math.exp(lam)
+
+        #use inverse sampling method
+        x = 1/lam * torch.log( 1 / (y*(1-c) + c) )
+
+        return x
 
     def apply_the_same_augmentation_to_list_of_image_tensors(self,image_tensor_list, augmentation_sequence):
         
