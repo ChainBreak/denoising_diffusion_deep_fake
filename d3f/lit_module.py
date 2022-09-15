@@ -53,7 +53,7 @@ class LitModule(pl.LightningModule):
                 translate=[0.1, 0.1], 
                 scale=[0.75, 1.25], 
                 shear=10, 
-                p=0.0,
+                p=0.1,
             ),
         )
         return augmentation_sequence
@@ -121,9 +121,11 @@ class LitModule(pl.LightningModule):
             # Generate the best fake we can
             fake = fake_model(real) 
 
+            blend_fake = self.blend_random_amount_of_real_with_the_fake(fake,real)
+
             # Force the real model to copy context by augmenting both the real and fake
             aug_real, aug_fake = self.apply_the_same_augmentation_to_list_of_image_tensors(
-                image_tensor_list=[real, fake],
+                image_tensor_list=[real, blend_fake],
                 augmentation_sequence=self.shared_augmentation_sequence,
             )
 
@@ -142,21 +144,34 @@ class LitModule(pl.LightningModule):
 
         return loss
 
+    def blend_random_amount_of_real_with_the_fake(self,fake,real):
+        p = self.hparams
+
+        b,c,h,w = fake.shape
+
+        r = self.sample_random_number_from_exponential_distribution(b,p.blend_exponential_sampling_lambda)
+
+        blend = torch.sqrt(1-r) * fake + torch.sqrt(r)*real
+
+        return blend
+
     def blend_random_amount_of_noise_with_each_sample(self,batch):
+        p = self.hparams
+
         noise = torch.randn_like(batch)
 
         b,c,h,w = batch.shape
 
-        r = self.sample_random_number_from_exponential_distribution(b)
+        r = self.sample_random_number_from_exponential_distribution(b,p.noise_exponential_sampling_lambda)
 
         noisy_batch = torch.sqrt(1-r) * batch + torch.sqrt(r)*noise
 
         return noisy_batch
 
-    def sample_random_number_from_exponential_distribution(self,batch_size):
-        p = self.hparams
+    def sample_random_number_from_exponential_distribution(self,batch_size,lam):
+        
 
-        lam = p.exponential_sampling_lambda
+        
 
         y = torch.rand(
             size=(batch_size,1,1,1),
