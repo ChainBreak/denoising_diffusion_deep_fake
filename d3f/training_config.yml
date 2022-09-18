@@ -1,19 +1,25 @@
-batch_size: 64
-learning_rate: 0.001
+batch_size: 40
+learning_rate: 0.01
 adam_b1: 0.5
 adam_b2: 0.999
-max_epochs: 1000
-cosine_scheduler_max_epoch: 1000
+max_epochs: 200
+cosine_scheduler_max_epoch: 200
 num_workers: 8
 encoder_name: "resnet18"
 
 log_images_every_n_steps: 100
 
-data_path_a: "/home/thomas/datasets/denoising_diffusion_deep_fake/tom_w128_h128"
+noise_exponential_sampling_lambda: 10
+blend_exponential_sampling_lambda: 10
+
+
+
+data_path_a: "/home/thomas/datasets/denoising_diffusion_deep_fake/tom_3_w256_h256"
+
+data_path_b: "/home/thomas/datasets/denoising_diffusion_deep_fake/georgia_3_w256_h256"
+
 mean_a: [128,128,128]
 std_a: [128,128,128]
-
-data_path_b: "/home/thomas/datasets/denoising_diffusion_deep_fake/georgia_w128_h128"
 mean_b: [128,128,128]
 std_b: [128,128,128]
 

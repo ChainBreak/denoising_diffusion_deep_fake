@@ -17,7 +17,6 @@ from d3f.dataset.image_dataset import ImageDataset
 
 from kornia import augmentation as K
 from kornia.augmentation import AugmentationSequential
-from kornia.filters import gaussian_blur2d
 
 
 
@@ -30,7 +29,7 @@ class LitModule(pl.LightningModule):
         self.model_a = self.create_model_instance()
         self.model_b = self.create_model_instance()
 
-        self.criterion = nn.L1Loss()
+        self.criterion = nn.MSELoss()
 
         self.shared_augmentation_sequence = self.create_shared_augmentation_sequence()
 
@@ -54,9 +53,8 @@ class LitModule(pl.LightningModule):
                 translate=[0.1, 0.1], 
                 scale=[0.75, 1.25], 
                 shear=10, 
-                p=0.5,
+                p=0.1,
             ),
-            
         )
         return augmentation_sequence
 
@@ -119,83 +117,84 @@ class LitModule(pl.LightningModule):
     def training_step_for_one_model(self,name, real, real_model, fake_model):
         
         with torch.no_grad():
+
             # Generate the best fake we can
             fake = fake_model(real) 
 
-            blured_fake = self.apply_random_blur_to_each_sample_in_batch(fake)
+            blend_fake = self.blend_random_amount_of_real_with_the_fake(fake,real)
 
             aug_real, aug_fake = self.apply_the_same_augmentation_to_list_of_image_tensors(
-                image_tensor_list=[real,blured_fake],
+                image_tensor_list=[real, blend_fake],
                 augmentation_sequence=self.shared_augmentation_sequence,
             )
 
-        real_prediction = real_model(aug_fake)
         
         loss = self.criterion(real_prediction, aug_real)
 
         self.log_batch_as_image_grid(f"1_real/{name}", real)
         self.log_batch_as_image_grid(f"2_fake/{name}_to_fake", fake)
-        self.log_batch_as_image_grid(f"blured_fake/{name}_to_fake", blured_fake)
-        self.log_batch_as_image_grid(f"model_input/{name}", aug_fake)
+        self.log_batch_as_image_grid(f"model_input/{name}", aug_noisy_fake)
         self.log_batch_as_image_grid(f"model_target/{name}", aug_real)
         self.log_batch_as_image_grid(f"model_prediction/{name}", real_prediction)
         self.log(f"loss/train_{name}",loss)
 
         return loss
 
-    def apply_random_blur_to_each_sample_in_batch(self,batch):
-        
+    def blend_random_amount_of_real_with_the_fake(self,fake,real):
+        p = self.hparams
+
+        b,c,h,w = fake.shape
+
+        r = self.sample_random_number_from_exponential_distribution(b,p.blend_exponential_sampling_lambda)
+
+        blend = torch.sqrt(1-r) * fake + torch.sqrt(r)*real
+
+        return blend
+
+    def blend_random_amount_of_noise_with_each_sample(self,batch):
+        p = self.hparams
+
+        noise = torch.randn_like(batch)
+
         b,c,h,w = batch.shape
 
-        batch = batch.clone()
+        r = self.sample_random_number_from_exponential_distribution(b,p.noise_exponential_sampling_lambda)
 
-        # for each sample index in the batch
-        for i in range(b):
-            
-            kernel_size = self.pick_a_random_kernel_size_for_blur(w,h)
+        noisy_batch = torch.sqrt(1-r) * batch + torch.sqrt(r)*noise
 
-            if kernel_size <=1: 
-                continue
+        return noisy_batch
 
-            sigma = kernel_size / 2.0
-
-            batch[i] = gaussian_blur2d(
-                    input=batch[i].unsqueeze(0),
-                    kernel_size=(kernel_size,kernel_size),
-                    sigma=(sigma,sigma),
-                ).squeeze(0)
-
-        return batch
-
-    def pick_a_random_kernel_size_for_blur(self, image_width, image_height):
-
-        p = self.hparams
+    def sample_random_number_from_exponential_distribution(self,batch_size,lam):
         
-        # Sampling the kernel size uniformly favours blury images.
-        # Instead sample the effective number of pixels after the blur 
-        # and calculate the kernel size to acheive it
 
-        total_number_of_pixels_in_image = image_width * image_height
+        
 
-        effective_number_of_pixels_after_blur = random.randint(1, total_number_of_pixels_in_image)
+        y = torch.rand(
+            size=(batch_size,1,1,1),
+            device=self.device,
+        )
 
-        kernel_size = math.sqrt(total_number_of_pixels_in_image / effective_number_of_pixels_after_blur)
+        c = 1/math.exp(lam)
 
-        kernel_size = int( round((kernel_size-1)/2) *2+1 )
+        #use inverse sampling method
+        x = 1/lam * torch.log( 1 / (y*(1-c) + c) )
 
-        return kernel_size
+        return x
 
     def apply_the_same_augmentation_to_list_of_image_tensors(self,image_tensor_list, augmentation_sequence):
         
-        random_seed = random.randint(0,2**32)
-
         augmented_tensor_list = []
+
+        augmentation_params = None
 
         for image_tensor in image_tensor_list:
 
-            torch.manual_seed(random_seed)
-            
-            augmented_image_tensor = augmentation_sequence(image_tensor)
+            augmented_image_tensor = augmentation_sequence(
+                image_tensor,
+                params=augmentation_params)
+
+            if augmentation_params == None:
+                augmentation_params = augmentation_sequence._params
 
             augmented_tensor_list.append(augmented_image_tensor)
 
