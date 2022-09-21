@@ -128,6 +128,9 @@ class LitModule(pl.LightningModule):
                 augmentation_sequence=self.shared_augmentation_sequence,
             )
 
+        aug_noisy_fake = self.blend_random_amount_of_noise_with_each_sample(aug_fake)
+
+        real_prediction = real_model(aug_noisy_fake)
         
         loss = self.criterion(real_prediction, aug_real)
 
