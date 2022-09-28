@@ -171,8 +171,22 @@ class LitModule(pl.LightningModule):
         
         t = torch.rand(size=(b,1,1,1), device=self.device)
 
+        t = self.exponentially_weight_towards_more_degradation(t)
+
         degraded_image = self.degrade_image(image_0, image_1 , t)
         return degraded_image
+
+    def exponentially_weight_towards_more_degradation(self,y):
+        p = self.hparams
+
+        lam = p.degrading_exponential_lambda
+
+        c = 1/math.exp(lam)
+
+        #use inverse sampling method
+        x = 1/lam * torch.log( 1 / (y*(1-c) + c) )
+
+        return 1-x
 
     def degrade_image(self, image_0, image_1 , t):
         # t=0 > image_0
