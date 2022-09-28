@@ -118,71 +118,68 @@ class LitModule(pl.LightningModule):
         
         with torch.no_grad():
 
-            # Generate the best fake we can
-            fake = fake_model(real) 
+            fake = self.iteratively_generate_fake(real,fake_model)
 
-            blend_fake = self.blend_random_amount_of_real_with_the_fake(fake,real)
+            degraded = self.degrade_image_with_random_t(real,fake)
 
-            aug_real, aug_fake = self.apply_the_same_augmentation_to_list_of_image_tensors(
-                image_tensor_list=[real, blend_fake],
+            aug_real, aug_degraded = self.apply_the_same_augmentation_to_list_of_image_tensors(
+                image_tensor_list=[real, degraded],
                 augmentation_sequence=self.shared_augmentation_sequence,
             )
 
-        aug_noisy_fake = self.blend_random_amount_of_noise_with_each_sample(aug_fake)
-
-        real_prediction = real_model(aug_noisy_fake)
+        real_prediction = real_model(aug_degraded)
         
         loss = self.criterion(real_prediction, aug_real)
 
         self.log_batch_as_image_grid(f"1_real/{name}", real)
         self.log_batch_as_image_grid(f"2_fake/{name}_to_fake", fake)
-        self.log_batch_as_image_grid(f"model_input/{name}", aug_noisy_fake)
+        self.log_batch_as_image_grid(f"model_input/{name}", aug_degraded)
         self.log_batch_as_image_grid(f"model_target/{name}", aug_real)
         self.log_batch_as_image_grid(f"model_prediction/{name}", real_prediction)
         self.log(f"loss/train_{name}",loss)
 
         return loss
 
-    def blend_random_amount_of_real_with_the_fake(self,fake,real):
+    def iteratively_generate_fake(self, real, fake_model):
         p = self.hparams
 
-        b,c,h,w = fake.shape
+        fake = self.iteratively_restore_image(real, fake_model, p.number_of_restoration_steps)
 
-        r = self.sample_random_number_from_exponential_distribution(b,p.blend_exponential_sampling_lambda)
+        return fake
 
-        blend = torch.sqrt(1-r) * fake + torch.sqrt(r)*real
+    def iteratively_restore_image(self, image_start, model, number_of_steps):
 
-        return blend
-
-    def blend_random_amount_of_noise_with_each_sample(self,batch):
-        p = self.hparams
-
-        noise = torch.randn_like(batch)
-
-        b,c,h,w = batch.shape
-
-        r = self.sample_random_number_from_exponential_distribution(b,p.noise_exponential_sampling_lambda)
-
-        noisy_batch = torch.sqrt(1-r) * batch + torch.sqrt(r)*noise
-
-        return noisy_batch
-
-    def sample_random_number_from_exponential_distribution(self,batch_size,lam):
+        t_list = torch.linspace(1.0, 0.0, number_of_steps+1)
         
+        image = image_start
 
+        for i in range(number_of_steps):
+
+            t = t_list[i]
+            t_next = t_list[i+1]
+
+            image_prediction = model(image)
+
+            image = image - \
+            self.degrade_image(image_prediction, image_start, t) + \
+            self.degrade_image(image_prediction, image_start, t_next)
+
+        return image
+
+    def degrade_image_with_random_t(self,image_0, image_1):
+        b,c,h,w = image_0.shape
         
+        t = torch.rand(size=(b,1,1,1), device=self.device)
 
-        y = torch.rand(
-            size=(batch_size,1,1,1),
-            device=self.device,
-        )
+        degraded_image = self.degrade_image(image_0, image_1 , t)
+        return degraded_image
 
-        c = 1/math.exp(lam)
+    def degrade_image(self, image_0, image_1 , t):
+        # t=0 > image_0
+        # t=1 > image_1
+        image_blend = (1-t) * image_0 + t*image_1
+        return image_blend
 
-        #use inverse sampling method
-        x = 1/lam * torch.log( 1 / (y*(1-c) + c) )
-
-        return x
 
     def apply_the_same_augmentation_to_list_of_image_tensors(self,image_tensor_list, augmentation_sequence):
         
@@ -236,7 +233,7 @@ class LitModule(pl.LightningModule):
 
         input_tensor = self.cv2_to_tensor_normalised(real_bgr, mean, std)
 
-        output_tensor = model(input_tensor)
+        output_tensor = self.iteratively_generate_fake(input_tensor, model)
 
         fake_bgr = self.tensor_cv2_to_denormalised(output_tensor, mean, std)
 
