@@ -18,6 +18,8 @@ from d3f.dataset.image_dataset import ImageDataset
 from kornia import augmentation as K
 from kornia.augmentation import AugmentationSequential
 
+from loss_functions import StructuralSimilarityLoss
+
 
 
 class LitModule(pl.LightningModule):
@@ -29,7 +31,7 @@ class LitModule(pl.LightningModule):
         self.model_a = self.create_model_instance()
         self.model_b = self.create_model_instance()
 
-        self.criterion = nn.MSELoss()
+        self.criterion = StructuralSimilarityLoss(-1.0,1.0)
 
         self.shared_augmentation_sequence = self.create_shared_augmentation_sequence()
 
