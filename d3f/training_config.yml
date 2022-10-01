@@ -7,7 +7,7 @@ cosine_scheduler_max_epoch: 200
 num_workers: 8
 encoder_name: "resnet34"
 
-log_images_every_n_steps: 1000
+log_images_every_n_steps: 200
 
 noise_exponential_sampling_lambda: 3
 blend_exponential_sampling_lambda: 100

@@ -55,7 +55,7 @@ class LitModule(pl.LightningModule):
                 translate=[0.1, 0.1], 
                 scale=[0.75, 1.25], 
                 shear=10, 
-                p=0.1,
+                p=0.2,
             ),
         )
         return augmentation_sequence
