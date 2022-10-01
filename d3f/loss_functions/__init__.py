@@ -1,1 +1,1 @@
-from .structural_similarity_loss import StructuralSimilarityLoss
+from .structural_similarity_loss import MseStructuralSimilarityLoss
