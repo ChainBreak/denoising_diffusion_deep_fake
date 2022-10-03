@@ -19,6 +19,7 @@ from kornia import augmentation as K
 from kornia.augmentation import AugmentationSequential
 
 from d3f.loss_functions import MseStructuralSimilarityLoss
+from d3f.helpers import LoggingScheduler
 
 
 
@@ -34,6 +35,8 @@ class LitModule(pl.LightningModule):
         self.criterion = MseStructuralSimilarityLoss(-1.0,1.0)
 
         self.shared_augmentation_sequence = self.create_shared_augmentation_sequence()
+
+        self.image_logging_scheduler = LoggingScheduler()
 
     def create_model_instance(self):
         p = self.hparams
@@ -170,9 +173,6 @@ class LitModule(pl.LightningModule):
         return noisy_batch
 
     def sample_random_number_from_exponential_distribution(self,batch_size,lam):
-        
-
-        
 
         y = torch.rand(
             size=(batch_size,1,1,1),
@@ -207,9 +207,7 @@ class LitModule(pl.LightningModule):
         
     def log_batch_as_image_grid(self,tag, batch, first_batch_only=False):
 
-        p = self.hparams
-
-        if self.global_step % p.log_images_every_n_steps == 0:
+        if self.image_logging_scheduler.should_we_log_this_step(self.global_step):
 
             nrows = 3
             ncols = 3
