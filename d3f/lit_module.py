@@ -111,6 +111,8 @@ class LitModule(pl.LightningModule):
         batch_a = batch["a"]
         batch_b = batch["b"]
 
+        self.image_logging_scheduler.update_with_step_number(self.global_step)
+
         if optimizer_idx == 0:
             loss = self.training_step_for_one_model("a", batch_a, self.model_a, self.model_b)
             
@@ -207,7 +209,7 @@ class LitModule(pl.LightningModule):
         
     def log_batch_as_image_grid(self,tag, batch, first_batch_only=False):
 
-        if self.image_logging_scheduler.should_we_log_this_step(self.global_step):
+        if self.image_logging_scheduler.should_we_log_this_step():
 
             nrows = 3
             ncols = 3

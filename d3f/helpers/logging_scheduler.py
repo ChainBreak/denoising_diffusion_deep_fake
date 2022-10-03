@@ -5,31 +5,37 @@ class LoggingScheduler():
 
     def __init__(self):
         
-        self._start_time = self._get_current_time()
-        self._last_log_time = self._get_current_time()
+        self.start_time = self.get_current_time()
+        self.last_log_time = self.get_current_time()
 
-        self._last_log_step = None
+        self.last_step_number = None
 
-        self._elapsed_time_since_start = 0.0
-        self._elapsed_time_since_last_log = 0.0
+        self.elapsed_time_since_start = 0.0
+        self.elapsed_time_since_last_log = 0.0
         
-    def should_we_log_this_step(self, global_step_count):
+    def update_with_step_number(self, global_step_number):
 
-        if self._is_it_still_the_same_step(global_step_count):
-            return True
-
-        if self._has_enough_time_elapsed_since_last_log():
-            self._last_log_step = global_step_count
-            self._last_log_time = self._get_current_time()
-            return True
-
-        return False
-
-    def _is_it_still_the_same_step(self,global_step_count):
-        return global_step_count == self._last_log_step
+        if self.has_step_number_changed(global_step_number):
             
-    def _has_enough_time_elapsed_since_last_log(self):
-        self._update_elapsed_times()
+            if self.has_enough_time_elapsed_since_last_log():
+                
+                self.last_log_time = self.get_current_time()
+                self.log_this_step = True
+
+            else:
+
+                self.log_this_step = False
+
+    def should_we_log_this_step(self):
+        return self.log_this_step
+
+    def has_step_number_changed(self,global_step_number):
+        changed = global_step_number != self.last_step_number
+        self.last_step_number = global_step_number
+        return changed
+            
+    def has_enough_time_elapsed_since_last_log(self):
+        self.update_elapsed_times()
 
         seconds = 1
         minutes = 60
@@ -37,19 +43,19 @@ class LoggingScheduler():
 
         time_between_logs = 1*hours
 
-        if self._elapsed_time_since_start < 1*minutes:
+        if self.elapsed_time_since_start < 1*minutes:
             time_between_logs = 10*seconds
-        elif self._elapsed_time_since_start < 10*minutes:
+        elif self.elapsed_time_since_start < 10*minutes:
             time_between_logs = 1*minutes
-        elif self._elapsed_time_since_start < 2*hours:
+        elif self.elapsed_time_since_start < 2*hours:
             time_between_logs = 30*minutes
 
-        return self._elapsed_time_since_last_log > time_between_logs
+        return self.elapsed_time_since_last_log > time_between_logs
 
-    def _update_elapsed_times(self):
-        current_time = self._get_current_time()
-        self._elapsed_time_since_start = current_time - self._start_time
-        self._elapsed_time_since_last_log = current_time - self._last_log_time
+    def update_elapsed_times(self):
+        current_time = self.get_current_time()
+        self.elapsed_time_since_start = current_time - self.start_time
+        self.elapsed_time_since_last_log = current_time - self.last_log_time
 
-    def _get_current_time(self):
+    def get_current_time(self):
         return time.time()
