@@ -1,22 +1,26 @@
+import click
 import yaml
-import argparse
 import pytorch_lightning as pl
 from pytorch_lightning.callbacks import LearningRateMonitor
-from d3f.lit_module import LitModule
+from d3f.train_deep_fake.lit_module import LitModule
 
+@click.command()
+@click.option("--config_path", required=True, help="Path to the config yaml.",)
+def train(config_path):
+    """Train the deep fake"""
 
-def main():
-    parser = argparse.ArgumentParser()
-    parser.add_argument("config_path",help="path to the config yaml")
-    args = parser.parse_args()
-    hparams_dict = read_yaml_file_into_dict(args.config_path)
+    hparams_dict = read_yaml_file_into_dict(config_path)
+
     start_training(hparams_dict)
 
+
 def read_yaml_file_into_dict(yaml_file_path):
+    
     with open(yaml_file_path) as f:
         return yaml.safe_load(f)
 
 def start_training(hparams_dict):
+
     lit_module = LitModule(**hparams_dict)
 
     p = lit_module.hparams
@@ -36,8 +40,7 @@ def start_training(hparams_dict):
         model=lit_module,
         )
 
-
 if __name__ == "__main__":
-    main()
+    train()
 
 
