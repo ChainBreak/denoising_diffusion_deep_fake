@@ -108,8 +108,8 @@ class LitModule(pl.LightningModule):
 
     def training_step(self, batch, batch_idx, optimizer_idx):
         
-        batch_a = batch["a"]
-        batch_b = batch["b"]
+        batch_a = batch["a"]["image"]
+        batch_b = batch["b"]["image"]
 
         self.image_logging_scheduler.update_with_step_number(self.global_step)
 

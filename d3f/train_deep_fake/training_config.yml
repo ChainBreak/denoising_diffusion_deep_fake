@@ -10,8 +10,8 @@ encoder_name: "resnet34"
 noise_exponential_sampling_lambda: 3
 blend_exponential_sampling_lambda: 100
 
-data_path_a: "/home/thomas/datasets/denoising_diffusion_deep_fake/tom_3_w448_h448"
-data_path_b: "/home/thomas/datasets/denoising_diffusion_deep_fake/georgia_3_w448_h448"
+data_path_a: "/home/thomas/datasets/denoising_diffusion_deep_fake/tom_3_w448_h448/images.txt"
+data_path_b: "/home/thomas/datasets/denoising_diffusion_deep_fake/georgia_3_w448_h448/images.txt"
 
 mean_a: [128,128,128]
 std_a: [128,128,128]
