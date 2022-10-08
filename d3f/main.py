@@ -1,6 +1,6 @@
 import click
-from train_deep_fake.start_training import train
-from balance_training_images.balance_training_images import balance
+from .train_deep_fake.start_training import train
+from .balance_training_images.balance_training_images import balance
 
 @click.group()
 def cli():
