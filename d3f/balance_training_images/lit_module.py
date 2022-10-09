@@ -129,7 +129,10 @@ class LitModule(pl.LightningModule):
 
         difficulty_loss = self.compute_difficulty_loss(image_prediction, image)
 
-        return {"index":image_index,"loss":difficulty_loss}
+        return {
+            "index":image_index.cpu(),
+            "loss":difficulty_loss.cpu(),
+            }
 
     def compute_difficulty_loss(self,predicted,target):
         loss = torch.abs(predicted-target)
