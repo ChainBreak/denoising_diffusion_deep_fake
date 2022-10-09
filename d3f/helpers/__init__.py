@@ -1,1 +1,2 @@
 from .logging_scheduler import LoggingScheduler
+from .convert_pyplot_figure_to_image_tensor import convert_pyplot_figure_to_image_tensor
