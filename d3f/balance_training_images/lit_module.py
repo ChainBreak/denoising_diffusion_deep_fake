@@ -30,7 +30,7 @@ class LitModule(pl.LightningModule):
         self.save_hyperparameters()
             
         self.model = self.create_model_instance()
-        self.criterion = MseStructuralSimilarityLoss(-1.0,1.0)
+        self.training_criterion = MseStructuralSimilarityLoss(-1.0,1.0)
 
         self.image_logging_scheduler = LoggingScheduler()
 
@@ -52,7 +52,7 @@ class LitModule(pl.LightningModule):
         p = self.hparams
         return self.create_dataloader(p.data_path, p.mean, p.std)
     
-    def valid_dataloader(self):
+    def val_dataloader(self):
         p = self.hparams
         return self.create_dataloader(p.data_path, p.mean, p.std)
    
@@ -95,7 +95,7 @@ class LitModule(pl.LightningModule):
 
         image_prediction = self.model(image_noisy)
         
-        loss = self.criterion(image_prediction, image)
+        loss = self.training_criterion(image_prediction, image)
 
         self.log_batch_as_image_grid(f"image", image)
         self.log_batch_as_image_grid(f"image_noisy", image_noisy)
@@ -103,7 +103,6 @@ class LitModule(pl.LightningModule):
         self.log(f"loss",loss)
 
         return loss
-
 
     def blend_fixed_amount_of_noise_with_each_sample(self,batch):
         p = self.hparams
@@ -118,8 +117,66 @@ class LitModule(pl.LightningModule):
 
         return noisy_batch
 
+    def validation_step(self, batch, batch_idx):
+        image = batch["image"]
+        image_index = batch["index"]
 
+        image_noisy = self.blend_fixed_amount_of_noise_with_each_sample(image)
+
+        image_prediction = self.model(image_noisy)
+
+        difficulty_loss = self.compute_difficulty_loss(image_prediction, image)
+
+        return {"index":image_index,"loss":difficulty_loss}
+
+    def compute_difficulty_loss(self,predicted,target):
+        loss = torch.abs(predicted-target)
+        loss = loss.mean(dim=(1,2,3))
+        return loss
+
+    def validation_epoch_end(self,validation_step_output_list):
+
+        dict_of_validation_tensors = self.concat_validation_output(validation_step_output_list)
         
+        image_index = dict_of_validation_tensors["index"]
+        difficulty_loss = dict_of_validation_tensors["loss"]
+
+        difficulty_index = self.compute_difficulty_index_for_each_loss(difficulty_loss)
+
+        print(torch.bincount(difficulty_index))
+
+    def concat_validation_output(self,validation_step_output_list):
+        dict_of_lists = {}
+
+        # Initialise empty lists for each output keys
+        for key in validation_step_output_list[0].keys():
+            dict_of_lists[key] = []
+
+        # Append all the same outputs together
+        for validation_step_output in validation_step_output_list:
+            for key,value in validation_step_output.items():
+                dict_of_lists[key].append(value)
+
+        # Stack the lists of tensor together for each key
+        for key in validation_step_output_list[0].keys():
+            dict_of_lists[key] = torch.concat(dict_of_lists[key])
+
+        return dict_of_lists
+
+    def compute_difficulty_index_for_each_loss(self,loss):
+        p = self.hparams
+
+        loss_min = loss.min()
+        loss_max = loss.max()
+
+        loss_normalised = (loss-loss_min)/(loss_max-loss_min)
+
+        loss_normalised = loss_normalised.clamp(0,0.99999)
+
+        difficulty_index = (loss_normalised * p.number_of_classes).long()
+        
+        return difficulty_index
+
     def log_batch_as_image_grid(self,tag, batch, first_batch_only=False):
 
         if self.image_logging_scheduler.should_we_log_this_step():
