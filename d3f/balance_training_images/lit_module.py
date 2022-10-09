@@ -36,6 +36,7 @@ class LitModule(pl.LightningModule):
 
     def create_model_instance(self):
         p = self.hparams
+
         encoder_name = p["encoder_name"]
 
         model = segmentation_models_pytorch.Unet(
@@ -49,11 +50,12 @@ class LitModule(pl.LightningModule):
 
     def train_dataloader(self):
         p = self.hparams
-
-        dataloader_a = self.create_dataloader(p.data_path_a, p.mean_a, p.mean_a)
-        dataloader_b = self.create_dataloader(p.data_path_b, p.mean_b, p.mean_b)
-  
-        return {"a":dataloader_a, "b":dataloader_b}
+        return self.create_dataloader(p.data_path, p.mean, p.std)
+    
+    def valid_dataloader(self):
+        p = self.hparams
+        return self.create_dataloader(p.data_path, p.mean, p.std)
+   
 
     def create_dataloader(self, path, mean, std):
         p = self.hparams
@@ -79,117 +81,44 @@ class LitModule(pl.LightningModule):
     def configure_optimizers(self):
         p = self.hparams
 
-        b1 = p.adam_b1
-        b2 = p.adam_b2
+        optimizer = optimizers.Adam(self.model.parameters(), lr=p.learning_rate)
 
-        optimizer_a = optimizers.Adam(self.model_a.parameters(), lr=p.learning_rate,betas=(b1,b2))
-        optimizer_b = optimizers.Adam(self.model_b.parameters(), lr=p.learning_rate,betas=(b1,b2))
+        return optimizer
 
-        scheduler_a = schedulers.CosineAnnealingLR(optimizer_a, T_max=p.cosine_scheduler_max_epoch)
-        scheduler_b = schedulers.CosineAnnealingLR(optimizer_b, T_max=p.cosine_scheduler_max_epoch)
-
-        return [optimizer_a, optimizer_b], [scheduler_a, scheduler_b]
-
-    def training_step(self, batch, batch_idx, optimizer_idx):
+    def training_step(self, batch, batch_idx):
         
-        batch_a = batch["a"]
-        batch_b = batch["b"]
-
         self.image_logging_scheduler.update_with_step_number(self.global_step)
 
-        if optimizer_idx == 0:
-            loss = self.training_step_for_one_model("a", batch_a, self.model_a, self.model_b)
-            
-        if optimizer_idx == 1:
-            loss = self.training_step_for_one_model("b", batch_b, self.model_b, self.model_a)
-            
-        return loss
+        image = batch["image"]
 
-    def training_step_for_one_model(self,name, real, real_model, fake_model):
+        image_noisy = self.blend_fixed_amount_of_noise_with_each_sample(image)
+
+        image_prediction = self.model(image_noisy)
         
-        with torch.no_grad():
+        loss = self.criterion(image_prediction, image)
 
-            # Generate the best fake we can
-            fake = fake_model(real) 
-
-            blend_fake = self.blend_random_amount_of_real_with_the_fake(fake,real)
-
-            aug_real, aug_fake = self.apply_the_same_augmentation_to_list_of_image_tensors(
-                image_tensor_list=[real, blend_fake],
-                augmentation_sequence=self.shared_augmentation_sequence,
-            )
-
-        aug_noisy_fake = self.blend_random_amount_of_noise_with_each_sample(aug_fake)
-
-        real_prediction = real_model(aug_noisy_fake)
-        
-        loss = self.criterion(real_prediction, aug_real)
-
-        self.log_batch_as_image_grid(f"1_real/{name}", real)
-        self.log_batch_as_image_grid(f"2_fake/{name}_to_fake", fake)
-        self.log_batch_as_image_grid(f"model_input/{name}", aug_noisy_fake)
-        self.log_batch_as_image_grid(f"model_target/{name}", aug_real)
-        self.log_batch_as_image_grid(f"model_prediction/{name}", real_prediction)
-        self.log(f"loss/train_{name}",loss)
+        self.log_batch_as_image_grid(f"image", image)
+        self.log_batch_as_image_grid(f"image_noisy", image_noisy)
+        self.log_batch_as_image_grid(f"image_prediction", image_prediction)
+        self.log(f"loss",loss)
 
         return loss
 
-    def blend_random_amount_of_real_with_the_fake(self,fake,real):
-        p = self.hparams
 
-        b,c,h,w = fake.shape
-
-        r = self.sample_random_number_from_exponential_distribution(b,p.blend_exponential_sampling_lambda)
-
-        blend = torch.sqrt(1-r) * fake + torch.sqrt(r)*real
-
-        return blend
-
-    def blend_random_amount_of_noise_with_each_sample(self,batch):
+    def blend_fixed_amount_of_noise_with_each_sample(self,batch):
         p = self.hparams
 
         noise = torch.randn_like(batch)
 
         b,c,h,w = batch.shape
 
-        r = self.sample_random_number_from_exponential_distribution(b,p.noise_exponential_sampling_lambda)
+        r = torch.ones((b,1,1,1),device=self.device)*p.ratio_of_noise
 
         noisy_batch = torch.sqrt(1-r) * batch + torch.sqrt(r)*noise
 
         return noisy_batch
 
-    def sample_random_number_from_exponential_distribution(self,batch_size,lam):
 
-        y = torch.rand(
-            size=(batch_size,1,1,1),
-            device=self.device,
-        )
-
-        c = 1/math.exp(lam)
-
-        #use inverse sampling method
-        x = 1/lam * torch.log( 1 / (y*(1-c) + c) )
-
-        return x
-
-    def apply_the_same_augmentation_to_list_of_image_tensors(self,image_tensor_list, augmentation_sequence):
-        
-        augmented_tensor_list = []
-
-        augmentation_params = None
-
-        for image_tensor in image_tensor_list:
-
-            augmented_image_tensor = augmentation_sequence(
-                image_tensor,
-                params=augmentation_params)
-
-            if augmentation_params == None:
-                augmentation_params = augmentation_sequence._params
-
-            augmented_tensor_list.append(augmented_image_tensor)
-
-        return augmented_tensor_list
         
     def log_batch_as_image_grid(self,tag, batch, first_batch_only=False):
 
@@ -207,54 +136,5 @@ class LitModule(pl.LightningModule):
 
             self.logger.experiment.add_image( tag, image, self.global_step)
 
-    def predict_fake(self,real_bgr,model_a_or_b):
-        p = self.hparams
-        if model_a_or_b == "a":
-            return self.predict_fake_for_single_frame(real_bgr, self.model_a, p.mean_b, p.std_b)
 
-        if model_a_or_b == "b":
-            return self.predict_fake_for_single_frame(real_bgr, self.model_b, p.mean_a, p.std_a)
-
-    def predict_fake_for_single_frame(self, real_bgr, model, mean ,std ):
-
-        mean = torch.tensor(mean,device=self.device)
-        std = torch.tensor(std,device=self.device)
-
-        input_tensor = self.cv2_to_tensor_normalised(real_bgr, mean, std)
-
-        output_tensor = model(input_tensor)
-
-        fake_bgr = self.tensor_cv2_to_denormalised(output_tensor, mean, std)
-
-        return fake_bgr
-
-    def cv2_to_tensor_normalised(self,image_bgr,mean,std):
-
-        image_rgb = cv2.cvtColor(image_bgr, cv2.COLOR_BGR2RGB)
-  
-        tensor = torch.from_numpy(image_rgb).float().to(self.device)
- 
-        tensor = tensor.permute(2,0,1) # hwc to chw
-
-        tensor -= mean.reshape(3,1,1)
-        tensor /= std.reshape(3,1,1)
-
-        return tensor.unsqueeze(0)
-
-    def tensor_cv2_to_denormalised(self,tensor,mean,std):
-        tensor = tensor.squeeze(0)
-
-        tensor *= std.reshape(3,1,1)
-        tensor += mean.reshape(3,1,1)
-
-        tensor = tensor.permute(1,2,0) # chw to hwc
-
-        tensor = tensor.int()
-        tensor = tensor.clamp(0,255)
-
-        image_rgb = tensor.cpu().numpy().astype(np.uint8)
-
-        image_bgr = cv2.cvtColor(image_rgb, cv2.COLOR_RGB2BGR)
-
-        return image_bgr
-        
+    

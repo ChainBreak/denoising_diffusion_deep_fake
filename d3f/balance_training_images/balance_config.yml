@@ -1,0 +1,16 @@
+batch_size: 12
+learning_rate: 0.01
+max_epochs: 200
+
+num_workers: 8
+encoder_name: "resnet34"
+
+ratio_of_noise: 0.7
+number_of_classes: 10
+
+data_path: "/home/thomas/datasets/denoising_diffusion_deep_fake/tom_3_w448_h448/images.txt"
+
+mean: [128,128,128]
+std: [128,128,128]
+
+
