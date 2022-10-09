@@ -19,7 +19,9 @@ from kornia import augmentation as K
 from kornia.augmentation import AugmentationSequential
 
 from d3f.loss_functions import MseStructuralSimilarityLoss
-from d3f.helpers import LoggingScheduler
+from d3f.helpers import LoggingScheduler, convert_pyplot_figure_to_image_tensor
+
+import matplotlib.pyplot as plt
 
 
 
@@ -143,7 +145,17 @@ class LitModule(pl.LightningModule):
 
         difficulty_index = self.compute_difficulty_index_for_each_loss(difficulty_loss)
 
-        print(torch.bincount(difficulty_index))
+        figure,axes = plt.subplots(1,1)
+        axes.hist(difficulty_index.cpu().numpy())
+        axes.set_xlabel("Difficulty Class")
+        axes.set_ylabel("Count")
+        self.log_figure( "difficulty_class_histogram", figure)
+        
+    def log_figure(self,tag,figure):
+
+        figure_image_tensor = convert_pyplot_figure_to_image_tensor(figure)
+        
+        self.logger.experiment.add_image( tag, figure_image_tensor, self.global_step)
 
     def concat_validation_output(self,validation_step_output_list):
         dict_of_lists = {}
@@ -176,6 +188,8 @@ class LitModule(pl.LightningModule):
         difficulty_index = (loss_normalised * p.number_of_classes).long()
         
         return difficulty_index
+
+    
 
     def log_batch_as_image_grid(self,tag, batch, first_batch_only=False):
 
