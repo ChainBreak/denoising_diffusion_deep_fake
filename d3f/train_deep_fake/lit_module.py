@@ -20,6 +20,7 @@ from kornia.augmentation import AugmentationSequential
 
 from d3f.loss_functions import MseStructuralSimilarityLoss
 from d3f.helpers import LoggingScheduler
+from d3f.train_denoiser.lit_module import LitModule as DenoisingModel
 
 
 
@@ -28,7 +29,11 @@ class LitModule(pl.LightningModule):
         super().__init__()
         
         self.save_hyperparameters()
-            
+        p = self.hparams
+        
+        self.denoising_model_a = self.load_denoising_model_from_checkpoint(p.denoising_model_a)
+        self.denoising_model_b = self.load_denoising_model_from_checkpoint(p.denoising_model_b)
+
         self.model_a = self.create_model_instance()
         self.model_b = self.create_model_instance()
 
@@ -37,6 +42,10 @@ class LitModule(pl.LightningModule):
         self.shared_augmentation_sequence = self.create_shared_augmentation_sequence()
 
         self.image_logging_scheduler = LoggingScheduler()
+
+    def load_denoising_model_from_checkpoint(self,checkpoint_path):
+        return DenoisingModel.load_from_checkpoint(checkpoint_path)
+
 
     def create_model_instance(self):
         p = self.hparams
@@ -58,7 +67,7 @@ class LitModule(pl.LightningModule):
                 translate=[0.1, 0.1], 
                 scale=[0.75, 1.25], 
                 shear=10, 
-                p=0.2,
+                p=0.5,
             ),
         )
         return augmentation_sequence
@@ -114,79 +123,41 @@ class LitModule(pl.LightningModule):
         self.image_logging_scheduler.update_with_step_number(self.global_step)
 
         if optimizer_idx == 0:
-            loss = self.training_step_for_one_model("a", batch_a, self.model_a, self.model_b)
+            loss = self.training_step_for_one_model("a", batch_a, self.model_a, self.model_b, self.denoising_model_b)
             
         if optimizer_idx == 1:
-            loss = self.training_step_for_one_model("b", batch_b, self.model_b, self.model_a)
+            loss = self.training_step_for_one_model("b", batch_b, self.model_b, self.model_a, self.denoising_model_a)
             
         return loss
 
-    def training_step_for_one_model(self,name, real, real_model, fake_model):
+    def training_step_for_one_model(self,name, real, real_model, fake_model, fake_denoising_model):
         
         with torch.no_grad():
 
             # Generate the best fake we can
             fake = fake_model(real) 
 
-            blend_fake = self.blend_random_amount_of_real_with_the_fake(fake,real)
+            denoised_fake = fake_denoising_model(fake)
 
-            aug_real, aug_fake = self.apply_the_same_augmentation_to_list_of_image_tensors(
-                image_tensor_list=[real, blend_fake],
+            aug_real, aug_denoised_fake = self.apply_the_same_augmentation_to_list_of_image_tensors(
+                image_tensor_list=[real, denoised_fake],
                 augmentation_sequence=self.shared_augmentation_sequence,
             )
 
-        aug_noisy_fake = self.blend_random_amount_of_noise_with_each_sample(aug_fake)
-
-        real_prediction = real_model(aug_noisy_fake)
+        real_prediction = real_model(aug_denoised_fake)
         
         loss = self.criterion(real_prediction, aug_real)
 
         self.log_batch_as_image_grid(f"1_real/{name}", real)
         self.log_batch_as_image_grid(f"2_fake/{name}_to_fake", fake)
-        self.log_batch_as_image_grid(f"model_input/{name}", aug_noisy_fake)
+        self.log_batch_as_image_grid(f"3_denoised_fake/{name}_to_fake", denoised_fake)
+        self.log_batch_as_image_grid(f"model_input/{name}", aug_denoised_fake)
         self.log_batch_as_image_grid(f"model_target/{name}", aug_real)
         self.log_batch_as_image_grid(f"model_prediction/{name}", real_prediction)
         self.log(f"loss/train_{name}",loss)
 
         return loss
 
-    def blend_random_amount_of_real_with_the_fake(self,fake,real):
-        p = self.hparams
-
-        b,c,h,w = fake.shape
-
-        r = self.sample_random_number_from_exponential_distribution(b,p.blend_exponential_sampling_lambda)
-
-        blend = torch.sqrt(1-r) * fake + torch.sqrt(r)*real
-
-        return blend
-
-    def blend_random_amount_of_noise_with_each_sample(self,batch):
-        p = self.hparams
-
-        noise = torch.randn_like(batch)
-
-        b,c,h,w = batch.shape
-
-        r = self.sample_random_number_from_exponential_distribution(b,p.noise_exponential_sampling_lambda)
-
-        noisy_batch = torch.sqrt(1-r) * batch + torch.sqrt(r)*noise
-
-        return noisy_batch
-
-    def sample_random_number_from_exponential_distribution(self,batch_size,lam):
-
-        y = torch.rand(
-            size=(batch_size,1,1,1),
-            device=self.device,
-        )
-
-        c = 1/math.exp(lam)
-
-        #use inverse sampling method
-        x = 1/lam * torch.log( 1 / (y*(1-c) + c) )
-
-        return x
 
     def apply_the_same_augmentation_to_list_of_image_tensors(self,image_tensor_list, augmentation_sequence):
         

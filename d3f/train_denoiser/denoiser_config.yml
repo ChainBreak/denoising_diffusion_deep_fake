@@ -1,0 +1,13 @@
+batch_size: 12
+learning_rate: 0.01
+max_epochs: 200
+
+num_workers: 8
+encoder_name: "resnet34"
+
+noise_exponential_sampling_lambda: 3
+
+mean: [128,128,128]
+std: [128,128,128]
+
+
