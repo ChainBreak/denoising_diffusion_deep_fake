@@ -18,8 +18,6 @@ from d3f.dataset.image_dataset import ImageDataset
 from kornia import augmentation as K
 from kornia.augmentation import AugmentationSequential
 
-import albumentations as A
-
 from d3f.loss_functions import MseStructuralSimilarityLoss
 from d3f.helpers import LoggingScheduler, convert_pyplot_figure_to_image_tensor
 
@@ -36,6 +34,8 @@ class LitModule(pl.LightningModule):
         self.model = self.create_model_instance()
         self.training_criterion = MseStructuralSimilarityLoss(-1.0,1.0)
 
+        self.shared_augmentation_sequence = self.create_shared_augmentation_sequence()
+
         self.image_logging_scheduler = LoggingScheduler()
 
     def create_model_instance(self):
@@ -51,6 +51,18 @@ class LitModule(pl.LightningModule):
             activation=None,
         )
         return model
+
+    def create_shared_augmentation_sequence(self):
+        augmentation_sequence = AugmentationSequential(
+            K.RandomAffine(
+                degrees=10, 
+                translate=[0.1, 0.1], 
+                scale=[0.75, 1.25], 
+                shear=10, 
+                p=1.0,
+            ),
+        )
+        return augmentation_sequence
 
     def train_dataloader(self):
         p = self.hparams
@@ -82,16 +94,23 @@ class LitModule(pl.LightningModule):
 
         optimizer = optimizers.Adam(self.model.parameters(), lr=p.learning_rate)
 
+        scheduler = schedulers.CosineAnnealingLR(optimizer, T_max=p.cosine_scheduler_max_epoch)
+ 
+
+        return [optimizer], [scheduler]
+
         return optimizer
 
     def forward(self,image):
         return self.model(image)
 
     def training_step(self, batch, batch_idx):
-        
+
         self.image_logging_scheduler.update_with_step_number(self.global_step)
 
         image = batch["image"]
+
+        image = self.shared_augmentation_sequence(image)
 
         image_noisy = self.blend_random_amount_of_noise_with_each_sample(image)
 

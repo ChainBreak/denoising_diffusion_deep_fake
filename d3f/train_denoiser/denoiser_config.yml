@@ -1,11 +1,11 @@
-batch_size: 12
+batch_size: 32
 learning_rate: 0.01
-max_epochs: 200
-
+max_epochs: 100
+cosine_scheduler_max_epoch: 100
 num_workers: 8
-encoder_name: "resnet34"
+encoder_name: "resnet18"
 
-noise_exponential_sampling_lambda: 3
+noise_exponential_sampling_lambda: 8
 
 mean: [128,128,128]
 std: [128,128,128]
