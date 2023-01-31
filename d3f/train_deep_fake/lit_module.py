@@ -66,8 +66,8 @@ class LitModule(pl.LightningModule):
                 degrees=10, 
                 translate=[0.1, 0.1], 
                 scale=[0.75, 1.25], 
-                shear=10, 
-                p=0.5,
+                shear=0, 
+                p=1.0,
             ),
         )
         return augmentation_sequence
@@ -134,23 +134,20 @@ class LitModule(pl.LightningModule):
         
         with torch.no_grad():
 
+            aug_real = self.shared_augmentation_sequence(real)
             # Generate the best fake we can
-            fake = fake_model(real) 
+            aug_fake = fake_model(aug_real) 
 
-            denoised_fake = fake_denoising_model(fake)
+            aug_denoised_fake = fake_denoising_model(aug_fake)
 
-            aug_real, aug_denoised_fake = self.apply_the_same_augmentation_to_list_of_image_tensors(
-                image_tensor_list=[real, denoised_fake],
-                augmentation_sequence=self.shared_augmentation_sequence,
-            )
-
+  
         real_prediction = real_model(aug_denoised_fake)
         
         loss = self.criterion(real_prediction, aug_real)
 
         self.log_batch_as_image_grid(f"1_real/{name}", real)
-        self.log_batch_as_image_grid(f"2_fake/{name}_to_fake", fake)
-        self.log_batch_as_image_grid(f"3_denoised_fake/{name}_to_fake", denoised_fake)
+        self.log_batch_as_image_grid(f"2_fake/{name}_to_fake", aug_fake)
+        self.log_batch_as_image_grid(f"3_denoised_fake/{name}_to_fake", aug_denoised_fake)
         self.log_batch_as_image_grid(f"model_input/{name}", aug_denoised_fake)
         self.log_batch_as_image_grid(f"model_target/{name}", aug_real)
         self.log_batch_as_image_grid(f"model_prediction/{name}", real_prediction)
@@ -197,19 +194,19 @@ class LitModule(pl.LightningModule):
     def predict_fake(self,real_bgr,model_a_or_b):
         p = self.hparams
         if model_a_or_b == "a":
-            return self.predict_fake_for_single_frame(real_bgr, self.model_a, p.mean_b, p.std_b)
+            return self.predict_fake_for_single_frame(real_bgr, self.model_a, self.denoising_model_a, p.mean_b, p.std_b)
 
         if model_a_or_b == "b":
-            return self.predict_fake_for_single_frame(real_bgr, self.model_b, p.mean_a, p.std_a)
+            return self.predict_fake_for_single_frame(real_bgr, self.model_b, self.denoising_model_b, p.mean_a, p.std_a)
 
-    def predict_fake_for_single_frame(self, real_bgr, model, mean ,std ):
+    def predict_fake_for_single_frame(self, real_bgr, fake_model, fake_denoising_model, mean ,std ):
 
         mean = torch.tensor(mean,device=self.device)
         std = torch.tensor(std,device=self.device)
 
         input_tensor = self.cv2_to_tensor_normalised(real_bgr, mean, std)
 
-        output_tensor = model(input_tensor)
+        output_tensor = fake_denoising_model(fake_model(input_tensor))
 
         fake_bgr = self.tensor_cv2_to_denormalised(output_tensor, mean, std)
 

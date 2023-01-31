@@ -1,20 +1,19 @@
-batch_size: 12
-learning_rate: 0.01
+batch_size: 24
+learning_rate: 0.0001
 adam_b1: 0.5
 adam_b2: 0.999
 max_epochs: 200
-cosine_scheduler_max_epoch: 200
+cosine_scheduler_max_epoch: 20000000000
 num_workers: 8
-encoder_name: "resnet34"
+encoder_name: "resnet18"
 
-noise_exponential_sampling_lambda: 3
-blend_exponential_sampling_lambda: 100
 
-denoising_model_a: "/home/thomas/co/denoising_diffusion_deep_fake/d3f/train_denoiser/lightning_logs/version_1/checkpoints/epoch=199-step=150999.ckpt"
-denoising_model_b: "/home/thomas/co/denoising_diffusion_deep_fake/d3f/train_denoiser/lightning_logs/version_2/checkpoints/epoch=199-step=150599.ckpt"
 
-data_path_a: "/home/thomas/datasets/denoising_diffusion_deep_fake/tom_3_w128_h128/images.txt"
-data_path_b: "/home/thomas/datasets/denoising_diffusion_deep_fake/georgia_3_w128_h128/images.txt"
+denoising_model_a: "/home/thomas/co/denoising_diffusion_deep_fake/d3f/lightning_logs/version_58/checkpoints/epoch=99-step=28399.ckpt"
+denoising_model_b: "/home/thomas/co/denoising_diffusion_deep_fake/d3f/lightning_logs/version_59/checkpoints/epoch=99-step=28299.ckpt"
+
+data_path_a: "/home/thomas/datasets/denoising_diffusion_deep_fake/tom_3_w256_h256/images.txt"
+data_path_b: "/home/thomas/datasets/denoising_diffusion_deep_fake/georgia_3_w256_h256/images.txt"
 
 mean_a: [128,128,128]
 std_a: [128,128,128]
