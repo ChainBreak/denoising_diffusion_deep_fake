@@ -4,7 +4,7 @@ import numpy as np
 from tqdm import tqdm
 import argparse
 from pathlib import Path
-from d3f.lit_module import LitModule
+from d3f.train_deep_fake.lit_module import LitModule
 from d3f.script_tools.video_writer_context_manager import VideoWriter
 
 def main():
@@ -69,9 +69,9 @@ class RenderFakeVideo():
 
                 video_writer.write(real_and_fake)
                 
-                cv2.imshow("real_and_fake",real_and_fake)
+                # cv2.imshow("real_and_fake",real_and_fake)
 
-                cv2.waitKey(1)
+                # cv2.waitKey(1)
 
     def get_output_video_path(self):
 
