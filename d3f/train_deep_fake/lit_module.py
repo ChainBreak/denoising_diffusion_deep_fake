@@ -34,10 +34,10 @@ class LitModule(pl.LightningModule):
         self.denoising_model_a = self.load_denoising_model_from_checkpoint(p.denoising_model_a)
         self.denoising_model_b = self.load_denoising_model_from_checkpoint(p.denoising_model_b)
 
-        self.model_a = self.create_model_instance()
-        self.model_b = self.create_model_instance()
+        self.model_a = self.load_denoising_model_from_checkpoint(p.denoising_model_a).model
+        self.model_b = self.load_denoising_model_from_checkpoint(p.denoising_model_b).model
 
-        self.criterion = MseStructuralSimilarityLoss(-1.0,1.0)
+        self.criterion = nn.MSELoss()
 
         self.shared_augmentation_sequence = self.create_shared_augmentation_sequence()
 
@@ -65,7 +65,7 @@ class LitModule(pl.LightningModule):
             K.RandomAffine(
                 degrees=10, 
                 translate=[0.1, 0.1], 
-                scale=[0.75, 1.25], 
+                scale=[0.95, 1.05], 
                 shear=0, 
                 p=1.0,
             ),
