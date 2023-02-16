@@ -34,8 +34,7 @@ class LitModule(pl.LightningModule):
         self.denoising_model_a = self.load_denoising_model_from_checkpoint(p.denoising_model_a)
         self.denoising_model_b = self.load_denoising_model_from_checkpoint(p.denoising_model_b)
 
-        self.model_a = self.load_denoising_model_from_checkpoint(p.denoising_model_a).model
-        self.model_b = self.load_denoising_model_from_checkpoint(p.denoising_model_b).model
+        self.model = self.load_denoising_model_from_checkpoint(p.denoising_model_a).model
 
         self.criterion = nn.MSELoss()
 
@@ -94,7 +93,7 @@ class LitModule(pl.LightningModule):
 
         dataloader = DataLoader(
             dataset=dataset, 
-            batch_size=p.batch_size,
+            batch_size=p.batch_size//2,
             num_workers=p.num_workers,
             shuffle=True,
             )
@@ -107,30 +106,37 @@ class LitModule(pl.LightningModule):
         b1 = p.adam_b1
         b2 = p.adam_b2
 
-        optimizer_a = optimizers.Adam(self.model_a.parameters(), lr=p.learning_rate,betas=(b1,b2))
-        optimizer_b = optimizers.Adam(self.model_b.parameters(), lr=p.learning_rate,betas=(b1,b2))
+        optimizer = optimizers.Adam(self.model.parameters(), lr=p.learning_rate,betas=(b1,b2))
+ 
+        scheduler = schedulers.CosineAnnealingLR(optimizer, T_max=p.cosine_scheduler_max_epoch)
 
-        scheduler_a = schedulers.CosineAnnealingLR(optimizer_a, T_max=p.cosine_scheduler_max_epoch)
-        scheduler_b = schedulers.CosineAnnealingLR(optimizer_b, T_max=p.cosine_scheduler_max_epoch)
+        return [optimizer], [scheduler]
 
-        return [optimizer_a, optimizer_b], [scheduler_a, scheduler_b]
+    def training_step(self, batch, batch_idx):
 
-    def training_step(self, batch, batch_idx, optimizer_idx):
+        self.image_logging_scheduler.update_with_step_number(self.global_step)
         
         batch_a = batch["a"]["image"]
         batch_b = batch["b"]["image"]
 
-        self.image_logging_scheduler.update_with_step_number(self.global_step)
+        real_a, fake_a = self.create_fake("a", batch_a, self.model,  self.denoising_model_b)
+        real_b, fake_b = self.create_fake("b", batch_b, self.model,  self.denoising_model_a)
+        
+        real = torch.concat([real_a,real_b],dim=0)
+        fake = torch.concat([fake_a,fake_b],dim=0)
 
-        if optimizer_idx == 0:
-            loss = self.training_step_for_one_model("a", batch_a, self.model_a, self.model_b, self.denoising_model_b)
-            
-        if optimizer_idx == 1:
-            loss = self.training_step_for_one_model("b", batch_b, self.model_b, self.model_a, self.denoising_model_a)
+        real_prediction = self.model(fake)
+        
+        loss = self.criterion(real_prediction, real)
+        
+        self.log_batch_as_image_grid(f"model_input", fake)
+        self.log_batch_as_image_grid(f"model_target", real)
+        self.log_batch_as_image_grid(f"model_prediction", real_prediction)
+        self.log(f"loss/train",loss)
             
         return loss
 
-    def training_step_for_one_model(self,name, real, real_model, fake_model, fake_denoising_model):
+    def create_fake(self,name, real, fake_model, fake_denoising_model):
         
         with torch.no_grad():
 
@@ -140,21 +146,11 @@ class LitModule(pl.LightningModule):
 
             aug_denoised_fake = fake_denoising_model(aug_fake)
 
-  
-        real_prediction = real_model(aug_denoised_fake)
-        
-        loss = self.criterion(real_prediction, aug_real)
-
         self.log_batch_as_image_grid(f"1_real/{name}", real)
         self.log_batch_as_image_grid(f"2_fake/{name}_to_fake", aug_fake)
         self.log_batch_as_image_grid(f"3_denoised_fake/{name}_to_fake", aug_denoised_fake)
-        self.log_batch_as_image_grid(f"model_input/{name}", aug_denoised_fake)
-        self.log_batch_as_image_grid(f"model_target/{name}", aug_real)
-        self.log_batch_as_image_grid(f"model_prediction/{name}", real_prediction)
-        self.log(f"loss/train_{name}",loss)
 
-        return loss
-
+        return aug_real, aug_denoised_fake
 
     def apply_the_same_augmentation_to_list_of_image_tensors(self,image_tensor_list, augmentation_sequence):
         
