@@ -1,6 +1,7 @@
 import cv2
 import numpy as np
 import math
+from math import sqrt
 import argparse
 import random
 import pytorch_lightning as pl
@@ -34,7 +35,7 @@ class LitModule(pl.LightningModule):
         self.denoising_model_a = self.load_denoising_model_from_checkpoint(p.denoising_model_a)
         self.denoising_model_b = self.load_denoising_model_from_checkpoint(p.denoising_model_b)
 
-        self.model = self.load_denoising_model_from_checkpoint(p.denoising_model_a).model
+        self.model = self.create_model_instance()
 
         self.criterion = nn.MSELoss()
 
@@ -144,13 +145,28 @@ class LitModule(pl.LightningModule):
             # Generate the best fake we can
             aug_fake = fake_model(aug_real) 
 
-            aug_denoised_fake = fake_denoising_model(aug_fake)
+            noisy_aug_fake = self.add_scheduled_amount_of_noise(aug_fake)
+
+            aug_denoised_fake = fake_denoising_model(noisy_aug_fake)
 
         self.log_batch_as_image_grid(f"1_real/{name}", real)
         self.log_batch_as_image_grid(f"2_fake/{name}_to_fake", aug_fake)
+        self.log_batch_as_image_grid(f"2_noisy_fake/{name}_to_fake", noisy_aug_fake)
         self.log_batch_as_image_grid(f"3_denoised_fake/{name}_to_fake", aug_denoised_fake)
 
         return aug_real, aug_denoised_fake
+
+    def add_scheduled_amount_of_noise(self,image):
+        p = self.hparams
+
+        alpha = (self.current_epoch+2) / p.noise_scheduler_max_epoch
+        alpha = min(alpha,1.0)
+
+        noise = torch.randn_like(image)
+
+        noisy_image = sqrt(alpha)*image + sqrt(1-alpha)*noise
+
+        return noisy_image
 
     def apply_the_same_augmentation_to_list_of_image_tensors(self,image_tensor_list, augmentation_sequence):
         
