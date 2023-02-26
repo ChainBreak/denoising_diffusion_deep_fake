@@ -54,7 +54,7 @@ class LitModule(pl.LightningModule):
         model = segmentation_models_pytorch.Unet(
             encoder_name=encoder_name,
             encoder_weights=None,
-            in_channels=3,
+            in_channels=4,
             classes=3,
             activation=None,
         )
@@ -120,41 +120,57 @@ class LitModule(pl.LightningModule):
         batch_a = batch["a"]["image"]
         batch_b = batch["b"]["image"]
 
-        real_a, fake_a = self.create_fake("a", batch_a, self.model,  self.denoising_model_b)
-        real_b, fake_b = self.create_fake("b", batch_b, self.model,  self.denoising_model_a)
+        real_a, fake_a = self.create_fake("a", batch_a, self.denoising_model_b)
+        real_b, fake_b = self.create_fake("b", batch_b, self.denoising_model_a)
         
         real = torch.concat([real_a,real_b],dim=0)
         fake = torch.concat([fake_a,fake_b],dim=0)
 
+        
         real_prediction = self.model(fake)
         
         loss = self.criterion(real_prediction, real)
         
-        self.log_batch_as_image_grid(f"model_input", fake)
+        self.log_batch_as_image_grid(f"model_input", fake[:,0:3,:,:])
         self.log_batch_as_image_grid(f"model_target", real)
         self.log_batch_as_image_grid(f"model_prediction", real_prediction)
         self.log(f"loss/train",loss)
             
         return loss
 
-    def create_fake(self,name, real, fake_model, fake_denoising_model):
+    def create_fake(self,name, real, fake_denoising_model):
         
         with torch.no_grad():
-
+            b,c,h,w = real.shape
             aug_real = self.shared_augmentation_sequence(real)
+
+            if name == "a":
+                indicator = torch.zeros((b,1,h,w),device=self.device)
+            if name == "b":
+                indicator = torch.ones((b,1,h,w),device=self.device)
+
+            noisy_aug_real = self.add_scheduled_amount_of_noise(aug_real)
+            noisy_aug_real_indicator = torch.concat((noisy_aug_real,indicator),dim=1)
+
             # Generate the best fake we can
-            aug_fake = fake_model(aug_real) 
+            aug_fake = self.model(noisy_aug_real_indicator) 
 
-            noisy_aug_fake = self.add_scheduled_amount_of_noise(aug_fake)
+            aug_denoised_fake = fake_denoising_model(aug_fake)
 
-            aug_denoised_fake = fake_denoising_model(noisy_aug_fake)
+            if name == "b":
+                indicator = torch.zeros((b,1,h,w),device=self.device)
+            if name == "a":
+                indicator = torch.ones((b,1,h,w),device=self.device)
+
+            noisy_aug_denoised_fake = self.add_scheduled_amount_of_noise(aug_denoised_fake)
+            aug_denoised_fake_indicator = torch.concat((noisy_aug_denoised_fake,indicator),dim=1)
 
         self.log_batch_as_image_grid(f"1_real/{name}", real)
         self.log_batch_as_image_grid(f"2_fake/{name}_to_fake", aug_fake)
-        self.log_batch_as_image_grid(f"2_noisy_fake/{name}_to_fake", noisy_aug_fake)
-        self.log_batch_as_image_grid(f"3_denoised_fake/{name}_to_fake", aug_denoised_fake)
+        self.log_batch_as_image_grid(f"3_denoised_fake/{name}_to_fake", aug_denoised_fake[:,0:3,:,:])
 
-        return aug_real, aug_denoised_fake
+
+        return aug_real, aug_denoised_fake_indicator
 
     def add_scheduled_amount_of_noise(self,image):
         p = self.hparams
