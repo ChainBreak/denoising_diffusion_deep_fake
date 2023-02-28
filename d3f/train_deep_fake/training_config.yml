@@ -1,9 +1,9 @@
 batch_size: 16
-learning_rate: 0.005
-adam_b1: 0.5
+learning_rate: 0.01
+adam_b1: 0.9
 adam_b2: 0.999
-max_epochs: 200
-cosine_scheduler_max_epoch: 200
+max_epochs: 30
+cosine_scheduler_max_epoch: 30
 num_workers: 8
 encoder_name: "resnet18"
 

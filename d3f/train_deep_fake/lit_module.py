@@ -140,6 +140,8 @@ class LitModule(pl.LightningModule):
 
             aug_denoised_fake = fake_denoising_model(aug_fake)
 
+            denoise_error = nn.functional.mse_loss(aug_fake,aug_denoised_fake)
+            swap_diff = nn.functional.mse_loss(aug_real,aug_denoised_fake)
   
         real_prediction = real_model(aug_denoised_fake)
         
@@ -151,6 +153,8 @@ class LitModule(pl.LightningModule):
         self.log_batch_as_image_grid(f"model_input/{name}", aug_denoised_fake)
         self.log_batch_as_image_grid(f"model_target/{name}", aug_real)
         self.log_batch_as_image_grid(f"model_prediction/{name}", real_prediction)
+        self.log(f"denoise_error/{name}",denoise_error)
+        self.log(f"swap_difference/{name}",swap_diff)
         self.log(f"loss/train_{name}",loss)
 
         return loss
