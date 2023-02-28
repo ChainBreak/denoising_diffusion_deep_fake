@@ -45,10 +45,10 @@ class LoggingScheduler():
 
         if self.elapsed_time_since_start < 1*minutes:
             time_between_logs = 10*seconds
-        elif self.elapsed_time_since_start < 10*minutes:
+        elif self.elapsed_time_since_start < 15*minutes:
             time_between_logs = 1*minutes
         elif self.elapsed_time_since_start < 2*hours:
-            time_between_logs = 30*minutes
+            time_between_logs = 10*minutes
 
         return self.elapsed_time_since_last_log > time_between_logs
 
