@@ -34,8 +34,8 @@ class LitModule(pl.LightningModule):
         self.denoising_model_a = self.load_denoising_model_from_checkpoint(p.denoising_model_a)
         self.denoising_model_b = self.load_denoising_model_from_checkpoint(p.denoising_model_b)
 
-        self.model_a = self.load_denoising_model_from_checkpoint(p.denoising_model_a).model
-        self.model_b = self.load_denoising_model_from_checkpoint(p.denoising_model_b).model
+        self.model_a = self.load_denoising_model_from_checkpoint(p.denoising_model_a)
+        self.model_b = self.load_denoising_model_from_checkpoint(p.denoising_model_b)
 
         self.criterion = nn.MSELoss()
 
@@ -44,7 +44,7 @@ class LitModule(pl.LightningModule):
         self.image_logging_scheduler = LoggingScheduler()
 
     def load_denoising_model_from_checkpoint(self,checkpoint_path):
-        return DenoisingModel.load_from_checkpoint(checkpoint_path)
+        return DenoisingModel.load_from_checkpoint(checkpoint_path).model
 
 
     def create_model_instance(self):
@@ -63,9 +63,9 @@ class LitModule(pl.LightningModule):
     def create_shared_augmentation_sequence(self):
         augmentation_sequence = AugmentationSequential(
             K.RandomAffine(
-                degrees=10, 
-                translate=[0.1, 0.1], 
-                scale=[0.95, 1.05], 
+                degrees=15, 
+                translate=[0.2, 0.2], 
+                scale=[0.8, 1.2], 
                 shear=0, 
                 p=1.0,
             ),
@@ -147,7 +147,7 @@ class LitModule(pl.LightningModule):
         
         loss = self.criterion(real_prediction, aug_real)
 
-        self.log_batch_as_image_grid(f"1_real/{name}", real)
+        self.log_batch_as_image_grid(f"1_real/{name}", aug_real)
         self.log_batch_as_image_grid(f"2_fake/{name}_to_fake", aug_fake)
         self.log_batch_as_image_grid(f"3_denoised_fake/{name}_to_fake", aug_denoised_fake)
         self.log_batch_as_image_grid(f"model_input/{name}", aug_denoised_fake)

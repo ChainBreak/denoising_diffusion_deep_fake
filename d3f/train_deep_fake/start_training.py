@@ -1,7 +1,7 @@
 import click
 import yaml
 import pytorch_lightning as pl
-from pytorch_lightning.callbacks import LearningRateMonitor
+from pytorch_lightning.callbacks import LearningRateMonitor, ModelCheckpoint
 from d3f.train_deep_fake.lit_module import LitModule
 
 @click.command()
@@ -26,7 +26,8 @@ def start_training(hparams_dict):
     p = lit_module.hparams
 
     callback_list = [
-        LearningRateMonitor(logging_interval='step')
+        LearningRateMonitor(logging_interval='step'),
+        ModelCheckpoint(monitor="loss/train_a",save_top_k=5),
     ]
 
     trainer = pl.Trainer(
