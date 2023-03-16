@@ -20,7 +20,6 @@ from kornia.augmentation import AugmentationSequential
 
 from d3f.loss_functions import MseStructuralSimilarityLoss
 from d3f.helpers import LoggingScheduler
-from d3f.train_denoiser.lit_module import LitModule as DenoisingModel
 
 
 
@@ -29,23 +28,15 @@ class LitModule(pl.LightningModule):
         super().__init__()
         
         self.save_hyperparameters()
-        p = self.hparams
-        
-        self.denoising_model_a = self.load_denoising_model_from_checkpoint(p.denoising_model_a)
-        self.denoising_model_b = self.load_denoising_model_from_checkpoint(p.denoising_model_b)
+            
+        self.model_a = self.create_model_instance()
+        self.model_b = self.create_model_instance()
 
-        self.model_a = self.load_denoising_model_from_checkpoint(p.denoising_model_a)
-        self.model_b = self.load_denoising_model_from_checkpoint(p.denoising_model_b)
-
-        self.criterion = nn.MSELoss()
+        self.criterion = MseStructuralSimilarityLoss(-1.0,1.0)
 
         self.shared_augmentation_sequence = self.create_shared_augmentation_sequence()
 
         self.image_logging_scheduler = LoggingScheduler()
-
-    def load_denoising_model_from_checkpoint(self,checkpoint_path):
-        return DenoisingModel.load_from_checkpoint(checkpoint_path).model
-
 
     def create_model_instance(self):
         p = self.hparams
@@ -123,34 +114,35 @@ class LitModule(pl.LightningModule):
         self.image_logging_scheduler.update_with_step_number(self.global_step)
 
         if optimizer_idx == 0:
-            loss = self.training_step_for_one_model("a", batch_a, self.model_a, self.model_b, self.denoising_model_b)
+            loss = self.training_step_for_one_model("a", batch_a, self.model_a, self.model_b)
             
         if optimizer_idx == 1:
-            loss = self.training_step_for_one_model("b", batch_b, self.model_b, self.model_a, self.denoising_model_a)
+            loss = self.training_step_for_one_model("b", batch_b, self.model_b, self.model_a)
             
         return loss
 
-    def training_step_for_one_model(self,name, real, real_model, fake_model, fake_denoising_model):
+    def training_step_for_one_model(self,name, real, real_model, fake_model):
         
         with torch.no_grad():
-
+            
             aug_real = self.shared_augmentation_sequence(real)
-            # Generate the best fake we can
+       
             aug_fake = fake_model(aug_real) 
 
-            aug_denoised_fake = fake_denoising_model(aug_fake)
+            noisy_aug_fake = self.blend_random_amount_of_noise_with_each_sample(aug_fake)
 
             denoise_error = nn.functional.mse_loss(aug_fake,aug_denoised_fake)
             swap_diff = nn.functional.mse_loss(aug_real,aug_denoised_fake)
   
         real_prediction = real_model(aug_denoised_fake)
+        real_prediction = real_model(noisy_aug_fake)
         
         loss = self.criterion(real_prediction, aug_real)
 
-        self.log_batch_as_image_grid(f"1_real/{name}", aug_real)
-        self.log_batch_as_image_grid(f"2_fake/{name}_to_fake", aug_fake)
-        self.log_batch_as_image_grid(f"3_denoised_fake/{name}_to_fake", aug_denoised_fake)
-        self.log_batch_as_image_grid(f"model_input/{name}", aug_denoised_fake)
+        self.log_batch_as_image_grid(f"1_real/{name}", real)
+        self.log_batch_as_image_grid(f"2_aug_real/{name}", aug_real)
+        self.log_batch_as_image_grid(f"3_aug_fake/{name}_to_fake", aug_fake)
+        self.log_batch_as_image_grid(f"model_input/{name}", noisy_aug_fake)
         self.log_batch_as_image_grid(f"model_target/{name}", aug_real)
         self.log_batch_as_image_grid(f"model_prediction/{name}", real_prediction)
         self.log(f"denoise_error/{name}",denoise_error)
@@ -159,6 +151,43 @@ class LitModule(pl.LightningModule):
 
         return loss
 
+    def blend_random_amount_of_real_with_the_fake(self,fake,real):
+        p = self.hparams
+
+        b,c,h,w = fake.shape
+
+        r = self.sample_random_number_from_exponential_distribution(b,p.blend_exponential_sampling_lambda)
+
+        blend = torch.sqrt(1-r) * fake + torch.sqrt(r)*real
+
+        return blend
+
+    def blend_random_amount_of_noise_with_each_sample(self,batch):
+        p = self.hparams
+
+        noise = torch.randn_like(batch)
+
+        b,c,h,w = batch.shape
+
+        r = self.sample_random_number_from_exponential_distribution(b,p.noise_exponential_sampling_lambda)
+
+        noisy_batch = torch.sqrt(1-r) * batch + torch.sqrt(r)*noise
+
+        return noisy_batch
+
+    def sample_random_number_from_exponential_distribution(self,batch_size,lam):
+
+        y = torch.rand(
+            size=(batch_size,1,1,1),
+            device=self.device,
+        )
+
+        c = 1/math.exp(lam)
+
+        #use inverse sampling method
+        x = 1/lam * torch.log( 1 / (y*(1-c) + c) )
+
+        return x
 
     def apply_the_same_augmentation_to_list_of_image_tensors(self,image_tensor_list, augmentation_sequence):
         
@@ -198,19 +227,19 @@ class LitModule(pl.LightningModule):
     def predict_fake(self,real_bgr,model_a_or_b):
         p = self.hparams
         if model_a_or_b == "a":
-            return self.predict_fake_for_single_frame(real_bgr, self.model_a, self.denoising_model_a, p.mean_b, p.std_b)
+            return self.predict_fake_for_single_frame(real_bgr, self.model_a, p.mean_b, p.std_b)
 
         if model_a_or_b == "b":
-            return self.predict_fake_for_single_frame(real_bgr, self.model_b, self.denoising_model_b, p.mean_a, p.std_a)
+            return self.predict_fake_for_single_frame(real_bgr, self.model_b, p.mean_a, p.std_a)
 
-    def predict_fake_for_single_frame(self, real_bgr, fake_model, fake_denoising_model, mean ,std ):
+    def predict_fake_for_single_frame(self, real_bgr, model, mean ,std ):
 
         mean = torch.tensor(mean,device=self.device)
         std = torch.tensor(std,device=self.device)
 
         input_tensor = self.cv2_to_tensor_normalised(real_bgr, mean, std)
 
-        output_tensor = fake_denoising_model(fake_model(input_tensor))
+        output_tensor = model(input_tensor)
 
         fake_bgr = self.tensor_cv2_to_denormalised(output_tensor, mean, std)
 
