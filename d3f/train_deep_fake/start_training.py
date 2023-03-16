@@ -3,6 +3,7 @@ import yaml
 import pytorch_lightning as pl
 from pytorch_lightning.callbacks import LearningRateMonitor, ModelCheckpoint
 from d3f.train_deep_fake.lit_module import LitModule
+from datetime import timedelta
 
 @click.command()
 @click.option("--config_path", required=True, help="Path to the config yaml.",)
@@ -27,7 +28,11 @@ def start_training(hparams_dict):
 
     callback_list = [
         LearningRateMonitor(logging_interval='step'),
-        ModelCheckpoint(monitor="loss/train_a",save_top_k=5),
+        ModelCheckpoint(
+            save_last=True,
+            save_top_k=-1,
+            train_time_interval=timedelta(hours=2),
+        ),
     ]
 
     trainer = pl.Trainer(
