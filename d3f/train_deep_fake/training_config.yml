@@ -7,6 +7,8 @@ cosine_scheduler_max_epoch: 99999
 num_workers: 8
 encoder_name: "resnet34"
 
+noise_exponential_sampling_lambda: 8
+
 denoising_model_a: "/home/thomas/co/denoising_diffusion_deep_fake/d3f/lightning_logs/version_0/checkpoints/epoch=99-step=56699.ckpt"
 denoising_model_b: "/home/thomas/co/denoising_diffusion_deep_fake/d3f/lightning_logs/version_1/checkpoints/epoch=99-step=56499.ckpt"
 

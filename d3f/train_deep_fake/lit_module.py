@@ -21,22 +21,25 @@ from kornia.augmentation import AugmentationSequential
 from d3f.loss_functions import MseStructuralSimilarityLoss
 from d3f.helpers import LoggingScheduler
 
-
+from d3f.train_denoiser.lit_module import LitModule as DenoisingModel
 
 class LitModule(pl.LightningModule):
     def __init__(self,**kwargs):
         super().__init__()
         
         self.save_hyperparameters()
-            
-        self.model_a = self.create_model_instance()
-        self.model_b = self.create_model_instance()
+        p = self.hparams
+        self.model_a = self.load_denoising_model_from_checkpoint(p.denoising_model_a)
+        self.model_b = self.load_denoising_model_from_checkpoint(p.denoising_model_b)
 
         self.criterion = MseStructuralSimilarityLoss(-1.0,1.0)
 
         self.shared_augmentation_sequence = self.create_shared_augmentation_sequence()
 
         self.image_logging_scheduler = LoggingScheduler()
+
+    def load_denoising_model_from_checkpoint(self,checkpoint_path):
+        return DenoisingModel.load_from_checkpoint(checkpoint_path).model
 
     def create_model_instance(self):
         p = self.hparams
@@ -130,11 +133,9 @@ class LitModule(pl.LightningModule):
             aug_fake = fake_model(aug_real) 
 
             noisy_aug_fake = self.blend_random_amount_of_noise_with_each_sample(aug_fake)
-
-            denoise_error = nn.functional.mse_loss(aug_fake,aug_denoised_fake)
-            swap_diff = nn.functional.mse_loss(aug_real,aug_denoised_fake)
+    
+            swap_diff = nn.functional.mse_loss(aug_real,aug_fake)
   
-        real_prediction = real_model(aug_denoised_fake)
         real_prediction = real_model(noisy_aug_fake)
         
         loss = self.criterion(real_prediction, aug_real)
@@ -145,7 +146,6 @@ class LitModule(pl.LightningModule):
         self.log_batch_as_image_grid(f"model_input/{name}", noisy_aug_fake)
         self.log_batch_as_image_grid(f"model_target/{name}", aug_real)
         self.log_batch_as_image_grid(f"model_prediction/{name}", real_prediction)
-        self.log(f"denoise_error/{name}",denoise_error)
         self.log(f"swap_difference/{name}",swap_diff)
         self.log(f"loss/train_{name}",loss)
 
