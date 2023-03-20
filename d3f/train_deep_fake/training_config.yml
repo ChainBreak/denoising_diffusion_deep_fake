@@ -15,8 +15,8 @@ denoising_model_b: "/home/thomas/co/denoising_diffusion_deep_fake/d3f/lightning_
 data_path_a: "/home/thomas/datasets/denoising_diffusion_deep_fake/tom_3_w448_h448/images.txt"
 data_path_b: "/home/thomas/datasets/denoising_diffusion_deep_fake/georgia_3_w448_h448/images.txt"
 
-mean_a: [128,128,128]
-std_a: [128,128,128]
-mean_b: [128,128,128]
-std_b: [128,128,128]
+mean_a: [0.5,0.5,0.5]
+std_a: [0.5,0.5,0.5]
+mean_b: [0.5,0.5,0.5]
+std_b: [0.5,0.5,0.5]
 

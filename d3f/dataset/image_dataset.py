@@ -1,8 +1,8 @@
+import cv2
 import torch
 from torch.utils.data import Dataset
 from pathlib import Path
 from itertools import chain
-import torchvision.io 
 
 
 class ImageDataset(Dataset):
@@ -33,12 +33,13 @@ class ImageDataset(Dataset):
     def __getitem__(self,index):
 
         image_path = self.image_path_list[index]
-        image_path = str(image_path.resolve())
+        image_path = str(image_path)
 
-        image = torchvision.io.read_image(image_path).float()
+        image = cv2.imread(image_path)
+        image = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
 
         if self.transform is not None:
-            image = self.transform(image)
+            image = self.transform(image=image)["image"] 
 
         return {"image":image, "index":index}
         

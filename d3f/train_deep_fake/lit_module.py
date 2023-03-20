@@ -15,8 +15,9 @@ import torchvision
 from torch.utils.data import DataLoader
 from d3f.dataset.image_dataset import ImageDataset
 
-from kornia import augmentation as K
-from kornia.augmentation import AugmentationSequential
+import albumentations as A
+from albumentations.pytorch import ToTensorV2
+
 
 from d3f.loss_functions import MseStructuralSimilarityLoss
 from d3f.helpers import LoggingScheduler
@@ -33,8 +34,6 @@ class LitModule(pl.LightningModule):
         self.model_b = self.load_denoising_model_from_checkpoint(p.denoising_model_b)
 
         self.criterion = MseStructuralSimilarityLoss(-1.0,1.0)
-
-        self.shared_augmentation_sequence = self.create_shared_augmentation_sequence()
 
         self.image_logging_scheduler = LoggingScheduler()
 
@@ -54,17 +53,7 @@ class LitModule(pl.LightningModule):
         )
         return model
 
-    def create_shared_augmentation_sequence(self):
-        augmentation_sequence = AugmentationSequential(
-            K.RandomAffine(
-                degrees=15, 
-                translate=[0.2, 0.2], 
-                scale=[0.8, 1.2], 
-                shear=0, 
-                p=1.0,
-            ),
-        )
-        return augmentation_sequence
+    
 
     def train_dataloader(self):
         p = self.hparams
@@ -77,9 +66,7 @@ class LitModule(pl.LightningModule):
     def create_dataloader(self, path, mean, std):
         p = self.hparams
 
-        transform = nn.Sequential(
-            T.Normalize(mean,std),
-        )
+        transform = self.create_augmentation_sequence(mean, std)
 
         dataset = ImageDataset(
             path,
@@ -94,6 +81,20 @@ class LitModule(pl.LightningModule):
             )
         
         return dataloader
+
+    def create_augmentation_sequence(self, mean, std):
+        augmentation_sequence = A.Compose([
+            A.Normalize(mean,std),
+            A.ShiftScaleRotate(
+                shift_limit=0.2,
+                scale_limit=0.2,
+                rotate_limit=15,
+                border_mode=0,
+                p=7.0
+            ),
+            ToTensorV2(),
+        ])
+        return augmentation_sequence
 
     def configure_optimizers(self):
         p = self.hparams
@@ -127,25 +128,22 @@ class LitModule(pl.LightningModule):
     def training_step_for_one_model(self,name, real, real_model, fake_model):
         
         with torch.no_grad():
-            
-            aug_real = self.shared_augmentation_sequence(real)
-       
-            aug_fake = fake_model(aug_real) 
+                   
+            fake = fake_model(real) 
 
-            noisy_aug_fake = self.blend_random_amount_of_noise_with_each_sample(aug_fake)
+            swap_diff = nn.functional.mse_loss(real,fake)
+
+            noisy_fake = self.blend_random_amount_of_noise_with_each_sample(fake)
     
-            swap_diff = nn.functional.mse_loss(aug_real,aug_fake)
-  
-        real_prediction = real_model(noisy_aug_fake)
+        real_prediction = real_model(noisy_fake)
         
-        loss = self.criterion(real_prediction, aug_real)
+        loss = self.criterion(real_prediction, real)
 
         self.log_batch_as_image_grid(f"1_real/{name}", real)
-        self.log_batch_as_image_grid(f"2_aug_real/{name}", aug_real)
-        self.log_batch_as_image_grid(f"3_aug_fake/{name}_to_fake", aug_fake)
-        self.log_batch_as_image_grid(f"model_input/{name}", noisy_aug_fake)
-        self.log_batch_as_image_grid(f"model_target/{name}", aug_real)
-        self.log_batch_as_image_grid(f"model_prediction/{name}", real_prediction)
+        self.log_batch_as_image_grid(f"2_fake/{name}_to_fake",fake)
+        self.log_batch_as_image_grid(f"3_noisiy_fake/{name}", noisy_fake)
+        self.log_batch_as_image_grid(f"4_model_prediction/{name}", real_prediction)
+        self.log_batch_as_image_grid(f"5_model_target/{name}", real)
         self.log(f"swap_difference/{name}",swap_diff)
         self.log(f"loss/train_{name}",loss)
 
@@ -188,25 +186,6 @@ class LitModule(pl.LightningModule):
         x = 1/lam * torch.log( 1 / (y*(1-c) + c) )
 
         return x
-
-    def apply_the_same_augmentation_to_list_of_image_tensors(self,image_tensor_list, augmentation_sequence):
-        
-        augmented_tensor_list = []
-
-        augmentation_params = None
-
-        for image_tensor in image_tensor_list:
-
-            augmented_image_tensor = augmentation_sequence(
-                image_tensor,
-                params=augmentation_params)
-
-            if augmentation_params == None:
-                augmentation_params = augmentation_sequence._params
-
-            augmented_tensor_list.append(augmented_image_tensor)
-
-        return augmented_tensor_list
         
     def log_batch_as_image_grid(self,tag, batch, first_batch_only=False):
 
