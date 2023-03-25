@@ -53,8 +53,6 @@ class LitModule(pl.LightningModule):
         )
         return model
 
-    
-
     def train_dataloader(self):
         p = self.hparams
 
@@ -87,10 +85,10 @@ class LitModule(pl.LightningModule):
             A.Normalize(mean,std),
             A.ShiftScaleRotate(
                 shift_limit=0.2,
-                scale_limit=0.2,
+                scale_limit=0.065,
                 rotate_limit=15,
                 border_mode=0,
-                p=7.0
+                p=0.7,
             ),
             ToTensorV2(),
         ])
@@ -232,16 +230,16 @@ class LitModule(pl.LightningModule):
  
         tensor = tensor.permute(2,0,1) # hwc to chw
 
-        tensor -= mean.reshape(3,1,1)
-        tensor /= std.reshape(3,1,1)
+        tensor -= mean.reshape(3,1,1)*255
+        tensor /= std.reshape(3,1,1)*255
 
         return tensor.unsqueeze(0)
 
     def tensor_cv2_to_denormalised(self,tensor,mean,std):
         tensor = tensor.squeeze(0)
 
-        tensor *= std.reshape(3,1,1)
-        tensor += mean.reshape(3,1,1)
+        tensor *= std.reshape(3,1,1)*255
+        tensor += mean.reshape(3,1,1)*255
 
         tensor = tensor.permute(1,2,0) # chw to hwc
 

@@ -30,7 +30,8 @@ def start_training(hparams_dict):
         LearningRateMonitor(logging_interval='step'),
         ModelCheckpoint(
             save_last=True,
-            save_top_k=-1,
+            save_top_k=8,
+            monitor="epoch",
             train_time_interval=timedelta(hours=2),
         ),
     ]
