@@ -18,7 +18,6 @@ from d3f.dataset.image_dataset import ImageDataset
 import albumentations as A
 from albumentations.pytorch import ToTensorV2
 
-
 from d3f.loss_functions import MseStructuralSimilarityLoss
 from d3f.helpers import LoggingScheduler
 
@@ -30,8 +29,8 @@ class LitModule(pl.LightningModule):
         
         self.save_hyperparameters()
         p = self.hparams
-        self.model_a = self.load_denoising_model_from_checkpoint(p.denoising_model_a)
-        self.model_b = self.load_denoising_model_from_checkpoint(p.denoising_model_b)
+        self.model_a = self.create_model_instance()
+        self.model_b = self.create_model_instance()
 
         self.criterion = MseStructuralSimilarityLoss(-1.0,1.0)
 
@@ -123,8 +122,33 @@ class LitModule(pl.LightningModule):
             
         return loss
 
-    def training_step_for_one_model(self,name, real, real_model, fake_model):
+    def training_step_for_one_model(self, name, real, real_model, fake_model):
+        p = self.hparams
+
+        if self.current_epoch < p.denoise_max_epochs:
+            loss = self.training_denoise_step_for_one_model(name, real, real_model)
+        else:
+            loss = self.training_swap_step_for_one_model(name, real, real_model, fake_model)
+
+        return loss
+
+    def training_denoise_step_for_one_model(self, name, real, real_model):
+        with torch.no_grad():
+                   
+            noisy_real = self.blend_random_amount_of_noise_with_each_sample(real)
+    
+        real_prediction = real_model(noisy_real)
         
+        loss = self.criterion(real_prediction, real)
+
+        self.log_batch_as_image_grid(f"denoise_1_model_input/{name}", noisy_real)
+        self.log_batch_as_image_grid(f"denoise_2_model_prediction/{name}", real_prediction)
+        self.log(f"loss_denoise/train_{name}",loss)
+
+        return loss
+
+    def training_swap_step_for_one_model(self, name, real, real_model, fake_model):
+
         with torch.no_grad():
                    
             fake = fake_model(real) 
@@ -137,26 +161,14 @@ class LitModule(pl.LightningModule):
         
         loss = self.criterion(real_prediction, real)
 
-        self.log_batch_as_image_grid(f"1_real/{name}", real)
-        self.log_batch_as_image_grid(f"2_fake/{name}_to_fake",fake)
-        self.log_batch_as_image_grid(f"3_noisiy_fake/{name}", noisy_fake)
-        self.log_batch_as_image_grid(f"4_model_prediction/{name}", real_prediction)
-        self.log_batch_as_image_grid(f"5_model_target/{name}", real)
+        self.log_batch_as_image_grid(f"swap_1_real/{name}", real)
+        self.log_batch_as_image_grid(f"swap_2_fake/{name}_to_fake",fake)
+        self.log_batch_as_image_grid(f"swap_3_model_input/{name}", noisy_fake)
+        self.log_batch_as_image_grid(f"swap_4_model_prediction/{name}", real_prediction)
         self.log(f"swap_difference/{name}",swap_diff)
-        self.log(f"loss/train_{name}",loss)
+        self.log(f"loss_swap/train_{name}",loss)
 
         return loss
-
-    def blend_random_amount_of_real_with_the_fake(self,fake,real):
-        p = self.hparams
-
-        b,c,h,w = fake.shape
-
-        r = self.sample_random_number_from_exponential_distribution(b,p.blend_exponential_sampling_lambda)
-
-        blend = torch.sqrt(1-r) * fake + torch.sqrt(r)*real
-
-        return blend
 
     def blend_random_amount_of_noise_with_each_sample(self,batch):
         p = self.hparams
