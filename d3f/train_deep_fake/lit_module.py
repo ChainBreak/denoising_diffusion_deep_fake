@@ -119,6 +119,8 @@ class LitModule(pl.LightningModule):
             
         if optimizer_idx == 1:
             loss = self.training_step_for_one_model("b", batch_b, self.model_b, self.model_a)
+
+        self.log("epoch",float(self.current_epoch))
             
         return loss
 

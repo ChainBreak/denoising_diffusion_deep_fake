@@ -2,13 +2,13 @@ batch_size: 14
 learning_rate: 0.0001
 adam_b1: 0.5
 adam_b2: 0.999
-denoise_max_epochs: 30
+denoise_max_epochs: 100
 max_epochs: 1000
 cosine_scheduler_max_epoch: 99999
 num_workers: 8
 encoder_name: "resnet34"
 
-noise_exponential_sampling_lambda: 5
+noise_exponential_sampling_lambda: 8
 
 data_path_a: "/home/thomas/datasets/denoising_diffusion_deep_fake/tom_3_w448_h448/images.txt"
 data_path_b: "/home/thomas/datasets/denoising_diffusion_deep_fake/georgia_3_w448_h448/images.txt"
