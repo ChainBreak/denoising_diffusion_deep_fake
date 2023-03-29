@@ -1,0 +1,9 @@
+mode: "swap"
+batch_size: 14
+learning_rate: 0.00001
+adam_b1: 0.5
+adam_b2: 0.999
+max_epochs: 1000
+cosine_scheduler_max_epoch: 99999
+
+

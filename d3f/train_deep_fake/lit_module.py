@@ -2,8 +2,10 @@ import cv2
 import numpy as np
 import math
 import argparse
+from datetime import timedelta
 import random
 import pytorch_lightning as pl
+from pytorch_lightning.callbacks import LearningRateMonitor, ModelCheckpoint
 import segmentation_models_pytorch
 import torch
 import torch.nn as nn
@@ -84,7 +86,7 @@ class LitModule(pl.LightningModule):
             A.Normalize(mean,std),
             A.ShiftScaleRotate(
                 shift_limit=0.2,
-                scale_limit=0.065,
+                scale_limit=0.1,
                 rotate_limit=15,
                 border_mode=0,
                 p=0.7,
@@ -107,6 +109,21 @@ class LitModule(pl.LightningModule):
 
         return [optimizer_a, optimizer_b], [scheduler_a, scheduler_b]
 
+    def configure_callbacks(self):
+        return [
+            LearningRateMonitor(logging_interval='step'),
+            ModelCheckpoint(
+                save_top_k=8,
+                monitor="epoch",
+                mode="max",
+                train_time_interval=timedelta(hours=2),
+            ),
+            ModelCheckpoint(
+                filename="last",
+                save_on_train_epoch_end=True,
+            ),
+        ]
+
     def training_step(self, batch, batch_idx, optimizer_idx):
         
         batch_a = batch["a"]["image"]
@@ -127,9 +144,9 @@ class LitModule(pl.LightningModule):
     def training_step_for_one_model(self, name, real, real_model, fake_model):
         p = self.hparams
 
-        if self.current_epoch < p.denoise_max_epochs:
+        if p.mode == "denoise":
             loss = self.training_denoise_step_for_one_model(name, real, real_model)
-        else:
+        elif p.mode == "swap":
             loss = self.training_swap_step_for_one_model(name, real, real_model, fake_model)
 
         return loss
