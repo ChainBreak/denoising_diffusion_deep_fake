@@ -1,10 +1,12 @@
 mode: "swap"
 batch_size: 14
-learning_rate: 0.0001
+learning_rate: 0.001
 adam_b1: 0.5
 adam_b2: 0.999
 max_epochs: 1000
 cosine_scheduler_max_epoch: 99999
 noise_exponential_sampling_lambda: 8
+ema_beta: 0.9999
+ema_update_every: 1
 
 

@@ -27,7 +27,7 @@ def resume(checkpoint_path):
 @click.option("--checkpoint_path", required=True, help="Path to model checkpoint.")
 def modify(config_path, checkpoint_path):
     hparams_dict = read_yaml_file_into_dict(config_path)
-    lit_module = LitModule.load_from_checkpoint(checkpoint_path,**hparams_dict)
+    lit_module = LitModule.load_from_checkpoint(checkpoint_path,strict=False,**hparams_dict)
     start_training(lit_module)
     
 

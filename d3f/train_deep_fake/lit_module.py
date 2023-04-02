@@ -25,6 +25,8 @@ from d3f.helpers import LoggingScheduler
 
 from d3f.train_denoiser.lit_module import LitModule as DenoisingModel
 
+from ema_pytorch import EMA
+
 class LitModule(pl.LightningModule):
     def __init__(self,**kwargs):
         super().__init__()
@@ -33,6 +35,9 @@ class LitModule(pl.LightningModule):
         p = self.hparams
         self.model_a = self.create_model_instance()
         self.model_b = self.create_model_instance()
+
+        self.ema_model_a = self.create_ema_model(self.model_a)
+        self.ema_model_b = self.create_ema_model(self.model_b)
 
         self.criterion = MseStructuralSimilarityLoss(-1.0,1.0)
 
@@ -53,6 +58,14 @@ class LitModule(pl.LightningModule):
             activation=None,
         )
         return model
+
+    def create_ema_model(self,model):
+        p = self.hparams
+        return EMA(
+            model,
+            beta = p.ema_beta,
+            update_every = p.ema_update_every,
+        )
 
     def train_dataloader(self):
         p = self.hparams
@@ -129,13 +142,12 @@ class LitModule(pl.LightningModule):
         batch_a = batch["a"]["image"]
         batch_b = batch["b"]["image"]
 
-        self.image_logging_scheduler.update_with_step_number(self.global_step)
-
         if optimizer_idx == 0:
-            loss = self.training_step_for_one_model("a", batch_a, self.model_a, self.model_b)
+            self.image_logging_scheduler.update_with_step_number(self.global_step)
+            loss = self.training_step_for_one_model("a", batch_a, self.model_a, self.ema_model_b)
             
         if optimizer_idx == 1:
-            loss = self.training_step_for_one_model("b", batch_b, self.model_b, self.model_a)
+            loss = self.training_step_for_one_model("b", batch_b, self.model_b, self.ema_model_a)
 
         self.log("epoch",float(self.current_epoch))
             
@@ -167,6 +179,8 @@ class LitModule(pl.LightningModule):
         return loss
 
     def training_swap_step_for_one_model(self, name, real, real_model, fake_model):
+
+        fake_model.update()
 
         with torch.no_grad():
                    
