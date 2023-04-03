@@ -65,6 +65,7 @@ class LitModule(pl.LightningModule):
             model,
             beta = p.ema_beta,
             update_every = p.ema_update_every,
+            include_online_model = False,
         )
 
     def train_dataloader(self):
