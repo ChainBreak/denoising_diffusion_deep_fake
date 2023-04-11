@@ -61,12 +61,13 @@ class LitModule(pl.LightningModule):
 
     def create_ema_model(self,model):
         p = self.hparams
-        return EMA(
-            model,
-            beta = p.ema_beta,
-            update_every = p.ema_update_every,
-            include_online_model = False,
-        )
+        if p.mode == "swap":
+            return EMA(
+                model,
+                beta = p.ema_beta,
+                update_every = p.ema_update_every,
+                include_online_model = False,
+            )
 
     def train_dataloader(self):
         p = self.hparams
